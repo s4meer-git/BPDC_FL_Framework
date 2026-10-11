@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.ipynb_checkpoints/
+data/
+Results/
+JPNotebooks/CellResults/
+*.zip
+.reference/
+FULL_AUDIT_REPORT.md
+notes.txt

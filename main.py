@@ -1,0 +1,306 @@
+from collections import Counter
+from torch.random import fork_rng
+from torch.utils.data import DataLoader, Subset
+
+import printer
+
+from configuration import configuration
+from datasets.loaders import load_dataset, get_dataset_labels
+from datasets.partition import dirichlet_partition
+from models.model_selector import build_model
+from participants.client import Clients
+from participants.server import run_one_round
+from analysis.metrics import accuracy, calculate_fairness_metrics
+from support_modules.seed import set_seed
+
+
+# Receives settings, client partitions and accuracy results from functions in main.py; info passing to printer.py.
+def report_progress(config, event, **data):
+    printer.report("main", event, config=config, **data)
+
+
+# Split the datasets loaded by main.py into clients using the seed and Dirichlet settings from config.
+def create_clients(train_dataset, test_dataset, config):
+    train_labels = get_dataset_labels(train_dataset)
+    test_labels = get_dataset_labels(test_dataset)
+
+    train_partitions = dirichlet_partition(
+        train_labels,
+        config.num_of_clients,
+        config.dirichlet_alpha,
+        config.seed
+    )
+    test_partitions = dirichlet_partition(
+        test_labels,
+        config.num_of_clients,
+        config.dirichlet_alpha,
+        config.seed + 1
+    )
+
+    clients = []
+
+    for client_id, indices in enumerate(train_partitions):
+        if not indices:
+            raise ValueError(
+                f"Client {client_id} has no training samples. "
+                "Use fewer clients or increase dirichlet_alpha."
+            )
+
+    for client_id in range(config.num_of_clients):
+        client_train_dataset = Subset(
+            train_dataset,
+            train_partitions[client_id]
+        )
+
+        client_test_dataset = Subset(
+            test_dataset,
+            test_partitions[client_id]
+        )
+
+
+        train_loader = DataLoader(
+            client_train_dataset,
+            batch_size=config.get_training_batch_size(),
+            shuffle=True
+        )
+        test_loader = DataLoader(
+            client_test_dataset,
+            batch_size=config.batch_size,
+            shuffle=False
+        )
+        client = Clients(client_id, train_loader, test_loader)
+        clients.append(client)
+
+        training_label_counts = Counter(
+            train_labels[index] for index in train_partitions[client_id]
+        )
+        testing_label_counts = Counter(
+            test_labels[index] for index in test_partitions[client_id]
+        )
+
+
+        # Training/test sample counts, label counts and assigned indices for this client; info passing to printer.py.
+        report_progress(
+            config,
+            "client_partition",
+            client_id=client_id,
+            training_samples=len(client_train_dataset),
+            testing_samples=len(client_test_dataset),
+            training_label_counts=dict(training_label_counts),
+            testing_label_counts=dict(testing_label_counts),
+            training_indices=train_partitions[client_id],
+            testing_indices=test_partitions[client_id],
+        )
+
+    return clients
+
+
+# Start an experiment with the supplied config and chosen results folder, or use the default configuration.
+def main(config=None, output_directory=None):
+    if config is None:
+        config = configuration()
+
+    method = config.method.lower()
+
+    if config.num_of_clients < 1:
+        raise ValueError("The number of clients must be positive.")
+    if method not in {"fedavg", "fairrfl", "fairmedian", "fedcda", "fedmut"}:
+        raise ValueError("Unknown method name: " + config.method)
+    if method == "fairmedian" and config.num_of_clients % 2 == 0:
+        raise ValueError("FairMedian requires an odd number of clients.")
+    config.current_round = 0
+
+
+    # Training settings and the folder chosen for this comparison's method CSVs; info passing to printer.py.
+    printer.start_run(config, output_directory)
+    try:
+        metrics = _run_experiment(config)
+
+
+        # The method CSV that contains this run's progress and final results; info passing to printer.py.
+        report_progress(
+            config,
+            "run_completed",
+            csv_file=str(printer.csv_file),
+        )
+
+        return metrics
+    except (Exception, KeyboardInterrupt) as error:
+
+
+        # The error or interruption and the method CSV where its progress was saved; info passing to printer.py.
+        report_progress(
+            config,
+            "run_failed",
+            error=str(error) or type(error).__name__,
+            csv_file=str(printer.csv_file),
+        )
+
+        raise
+    finally:
+        printer.end_run()
+
+
+# main() supplies the config used to load datasets, train the rounds and calculate the final scores.
+def _run_experiment(config):
+    set_seed(config.seed)
+
+
+    # Dataset, device, client count, learning rate and other training settings; info passing to printer.py.
+    report_progress(
+        config,
+        "run_started",
+    )
+
+    train_dataset, test_dataset = load_dataset(config.dataset)
+
+
+    # Total training and test sample counts from the loaded datasets; info passing to printer.py.
+    report_progress(
+        config,
+        "dataset_loaded",
+        dataset=config.dataset,
+        training_samples=len(train_dataset),
+        testing_samples=len(test_dataset),
+    )
+
+    clients = create_clients(train_dataset, test_dataset, config)
+
+    global_test_loader = DataLoader(
+        test_dataset,
+        batch_size=config.batch_size,
+        shuffle=False
+    )
+
+    global_model = build_model(config.dataset)
+    global_model = global_model.to(config.device)
+
+
+    # The built model class, device and total number of parameters; info passing to printer.py.
+    report_progress(
+        config,
+        "model_created",
+        model_class=type(global_model).__name__,
+        device=config.device,
+        parameter_count=sum(p.numel() for p in global_model.parameters()),
+    )
+
+    for round_number in range(1, config.rounds + 1):
+        global_model = run_one_round(
+            global_model,
+            clients,
+            config,
+            round_number
+        )
+
+        global_accuracy = accuracy(
+            global_model,
+            global_test_loader,
+            config.device,
+            config=config
+        )
+
+
+        # This round number, global test accuracy and evaluated sample count; info passing to printer.py.
+        report_progress(
+            config,
+            "round_accuracy",
+            round_number=round_number,
+            global_accuracy=global_accuracy,
+            testing_samples=len(test_dataset),
+        )
+
+
+        # The round and client count being evaluated for the notebook; info passing to printer.py.
+        report_progress(
+            config,
+            "round_evaluation_started",
+            round_number=round_number,
+            client_count=len(clients),
+        )
+
+
+        # Test loaders use the CPU random generator too, so preserve it for the next round's training shuffle.
+        with fork_rng(devices=[]):
+            for client in clients:
+                client_accuracy = accuracy(
+                    global_model,
+                    client.test_loader,
+                    config.device,
+                    config=config,
+                    client_id=client.client_id,
+                )
+
+
+                # This client's accuracy after this round, used to calculate its round average; info passing to printer.py.
+                report_progress(
+                    config,
+                    "round_client_accuracy",
+                    round_number=round_number,
+                    client_id=client.client_id,
+                    client_accuracy=client_accuracy,
+                    testing_samples=len(client.test_loader.dataset),
+                )
+
+    client_accuracies = []
+
+
+    # The number of clients whose final test accuracy will be evaluated; info passing to printer.py.
+    report_progress(
+        config,
+        "evaluation_started",
+        client_count=len(clients),
+    )
+
+    for client in clients:
+        client_accuracy = accuracy(
+            global_model,
+            client.test_loader,
+            config.device,
+            config=config,
+            client_id=client.client_id
+        )
+
+        client_accuracies.append(client_accuracy)
+
+
+        # This client ID, its final test accuracy and its test sample count; info passing to printer.py.
+        report_progress(
+            config,
+            "client_accuracy",
+            client_id=client.client_id,
+            client_accuracy=client_accuracy,
+            testing_samples=len(client.test_loader.dataset),
+        )
+
+    global_accuracy = accuracy(
+        global_model,
+        global_test_loader,
+        config.device,
+        config=config
+    )
+
+    metrics = calculate_fairness_metrics(
+        global_accuracy,
+        client_accuracies
+    )
+
+    metrics["client_accuracies"] = client_accuracies
+
+
+    # Final global/client accuracies, fairness metrics and their matching client IDs; info passing to printer.py.
+    report_progress(
+        config,
+        "final_results",
+        metrics=metrics,
+        client_ids=[client.client_id for client in clients],
+    )
+
+    return metrics
+
+
+if __name__ == "__main__":
+
+
+    # Ask where this comparison's method CSVs should be saved before starting training.
+    main(output_directory=printer.choose_directory())
