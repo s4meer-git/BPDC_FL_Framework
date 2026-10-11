@@ -18,7 +18,7 @@ Use an environment with PyTorch, torchvision and NumPy installed. Install the no
 
 Choose your settings in `configuration.py`, then run `python main.py` from the project root. Device selection uses CUDA when available, otherwise MPS. MNIST and CIFAR-10 download automatically; Tiny ImageNet should be extracted into `data/tiny-imagenet-200`.
 
-The analysis notebook is `JPNotebooks/Analysis.ipynb`. Select the method CSV folder in its loading cell and run all cells. It checks run completeness and exports accuracy and loss PDFs.
+The analysis notebook is `JPNotebooks/Analysis.ipynb`. Choose the Tiny ImageNet, MNIST or CIFAR-10 section, select its method CSV folder in the loading cell, and run that section's three plotting cells. It checks run completeness and exports accuracy and loss PDFs.
 
 ## Methods and experiment limits
 

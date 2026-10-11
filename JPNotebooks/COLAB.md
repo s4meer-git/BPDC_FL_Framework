@@ -14,7 +14,13 @@ MNIST and CIFAR-10 download automatically during the run. The dataset cell downl
 
 Run the training cell for one method. After it finishes, change the method in the settings cell and rerun from that cell onward. Keep the same dataset, experiment settings and comparison name to collect methods together.
 
-The analysis cell uses the existing plotting code in `Analysis.ipynb`. It reads all method CSVs in the selected comparison and saves the same three figures without editing the analysis notebook's default folder.
+The analysis cell selects the three plotting cells for the current dataset from `Analysis.ipynb`. It reads all method CSVs in the selected comparison and saves those figures without running the other datasets' sections.
+
+For local analysis, `Analysis.ipynb` has separate Tiny ImageNet, MNIST and CIFAR-10 sections. Each has an editable loading cell followed by accuracy, loss-per-round and client-loss comparison cells. Run the section whose CSVs are available; an unrun dataset's section reports that its folder has no CSVs. Each section checks the recorded dataset so different datasets cannot be mixed accidentally.
+
+## Which configuration is used
+
+The launcher creates `config = configuration()`, then overrides experiment settings in its settings cell. The class still supplies device selection, method dispatch and other defaults. Values explicitly set in the notebook take priority: if `configuration.py` says 3 rounds but the launcher assigns 40, Colab runs 40. The recorded CSV settings describe the actual run. The analysis uses those recorded settings rather than today's Python configuration.
 
 ## Where results are saved
 
