@@ -238,6 +238,9 @@ def print_progress(event, data):
     elif event == "run_completed":
         print("CSV:", data["csv_file"])
 
+    elif event == "fedmut_diagnostic" and data["invalid_tensors"]:
+        print("FedMut diagnostic:", data["stage"], "invalid tensors:", ", ".join(data["invalid_tensors"]), flush=True)
+
     elif event == "run_failed":
         print("Run failed:", data["error"])
         print("CSV:", data["csv_file"])

@@ -2,6 +2,7 @@ import copy
 import math
 import torch
 import printer
+from support_modules.fedmut_diagnostics import check_tensors
 
 
 # Receives client, epoch, batch and loss values from train_local() before forwarding them; info passing to printer.py.
@@ -25,6 +26,7 @@ def train_local(global_model, train_loader, config, client_id=None):
     )
 
     loss_function = torch.nn.CrossEntropyLoss()
+    diagnose = config.method.lower() == "fedmut"
 
     for epoch in range(config.local_epochs):
         total_loss = 0.0
@@ -45,9 +47,24 @@ def train_local(global_model, train_loader, config, client_id=None):
 
             optimizer.zero_grad()
 
+
+            # Temporary FedMut checks record the input and starting weights for this exact training batch.
+            if diagnose:
+                location = dict(client_id=client_id, epoch=epoch + 1, batch=no_of_batches + 1)
+                check_tensors(config, "before_forward", local_model.state_dict(), **location)
+                check_tensors(config, "input_batch", {"images": images, "labels": labels}, **location)
+
             predictions = local_model(images)
+
+            if diagnose:
+                outputs = {"predictions": predictions, **dict(local_model.named_buffers())}
+                check_tensors(config, "after_forward", outputs, **location)
+
             loss = loss_function(predictions, labels)
             batch_loss = loss.item()
+
+            if diagnose:
+                check_tensors(config, "loss", {"loss": loss}, **location)
 
 
             # Stop at the first invalid loss so this client's weights are not updated with NaN or infinity.
@@ -60,7 +77,21 @@ def train_local(global_model, train_loader, config, client_id=None):
                 )
 
             loss.backward()
+
+
+            # Temporary FedMut checks record gradients before SGD and weights and momentum immediately after it.
+            if diagnose:
+                gradients = {name: parameter.grad for name, parameter in local_model.named_parameters()}
+                check_tensors(config, "after_backward", gradients, **location)
+
             optimizer.step()
+
+            if diagnose:
+                updated = dict(local_model.state_dict())
+                for name, parameter in local_model.named_parameters():
+                    state = optimizer.state.get(parameter, {})
+                    updated[f"momentum.{name}"] = state.get("momentum_buffer")
+                check_tensors(config, "after_optimizer", updated, **location)
 
             total_loss += batch_loss
             no_of_batches += 1
