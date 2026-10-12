@@ -65,11 +65,3 @@ Colab's free GPU availability and session length vary, and free sessions can las
 FedMut on CIFAR-10 now clips the combined gradient L2 norm to `10.0` before each SGD update. The setting is `config.fedmut_cifar_grad_norm`; it is inherited by the Colab notebook from `configuration.py`. Shared learning rate, momentum, epochs, batch size, architecture and mutation radius are unchanged. Other methods and FedMut on other datasets do not use this clipping.
 
 This is a framework stability adaptation, not part of the authors' original FedMut trainer. The CSV records the limit, each batch's gradient norm before clipping, and whether clipping occurred. Describe new CIFAR-10 results as FedMut with gradient clipping. `None` reproduces the original unclipped behavior for reference comparisons. Non-finite losses or gradients still stop training instead of producing misleading results.
-
-The live diagnostic scans and failure recording have been removed from the training path. Existing diagnostic ZIPs remain usable with the offline replay tool:
-
-```python
-!python -m support_modules.replay_fedmut "/path/to/round_4_client_15_1.zip" --device cpu
-```
-
-Historical snapshots without the clipping setting replay with clipping disabled. The tool compares the local trainers on the saved inputs, not a complete federated experiment. Hardware differences can move the failure point.

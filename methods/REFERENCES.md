@@ -110,7 +110,7 @@ adaptation, not an author-code feature. It was introduced after a saved failing
 client reproduced float32 overflow in both trainers. Shared training settings
 and mutation arithmetic remain unchanged. Each batch records its pre-clipping
 gradient norm and whether clipping occurred. Set this field to `None` when
-replaying the original unclipped method. Other datasets and methods do not use
+running the original unclipped method. Other datasets and methods do not use
 this clipping. New CIFAR-10 results should disclose the safeguard.
 
 
