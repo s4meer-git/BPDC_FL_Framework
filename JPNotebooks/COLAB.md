@@ -59,3 +59,19 @@ Keep Colab source files unchanged when using this workflow. A pull stops if loca
 - Configuration selects CUDA when available, otherwise MPS. The MPS availability guard remains commented out as requested. The Colab launcher's GPU check prevents starting there without CUDA.
 
 Colab's free GPU availability and session length vary, and free sessions can last at most 12 hours. See the [official Colab FAQ](https://research.google.com/colaboratory/faq.html) for limits, Drive access and importing notebooks.
+
+## Temporary FedMut failure recordings
+
+FedMut currently records each active client's starting weights and transformed batches on the Colab disk. Successful client recordings are deleted. If local training fails, the recording is kept under `Results/<comparison>/fedmut_snapshots/round_<round>_client_<client>_<version>.zip`, including the failing model, gradients and optimizer state. The updated training cell copies completed ZIPs into the same comparison folder on Drive.
+
+After pulling this update, reopen the GitHub version of `Colab.ipynb` to load its updated training cell. Restart the Python session and rerun setup. Use a separate comparison name for this investigation. A forced runtime termination can still interrupt recording or copying.
+
+To compare the two local trainers on a recorded client, run this from the project root, replacing the path:
+
+```python
+!python -m support_modules.replay_fedmut "/content/drive/MyDrive/FLFrameWork/Results/fedmut_diagnostic_cifar10/fedmut_snapshots/round_4_client_8_1.zip" --device cpu
+```
+
+The replay uses the real framework trainer and the pinned original author SGD trainer with the same model, starting weights and already augmented batches. It saves a `.replay.json` report beside the ZIP, compares tensor hashes, and checks individual module outputs for non-finite values. This checks local training, not the entire federated experiment. It does not resume training. CPU replay or nondeterministic CUDA kernels can move the failure point compared with the original run. Use `--device cuda` when comparing on an available NVIDIA GPU.
+
+These temporary recordings add local disk writes and diagnostic overhead. They do not change the radius, optimizer settings, architecture or update formulas. Only failed-client recordings are retained, and only FedMut is recorded.

@@ -241,6 +241,15 @@ def print_progress(event, data):
     elif event == "fedmut_diagnostic" and data["invalid_tensors"]:
         print("FedMut diagnostic:", data["stage"], "invalid tensors:", ", ".join(data["invalid_tensors"]), flush=True)
 
+    elif event == "fedmut_snapshot":
+        print("FedMut failure snapshot:", data["path"], flush=True)
+
+    elif event == "fedmut_snapshot_error":
+        print("Could not finish FedMut snapshot:", data["error"], "Temporary file:", data["path"], flush=True)
+
+    elif event == "fedmut_replay":
+        print(data["message"], flush=True)
+
     elif event == "run_failed":
         print("Run failed:", data["error"])
         print("CSV:", data["csv_file"])
