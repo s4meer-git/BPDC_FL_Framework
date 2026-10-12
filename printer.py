@@ -255,6 +255,5 @@ def report(source, event, config=None, **data):
     if event in {"run_started", "final_results"}:
         data["settings"] = run_settings
 
-    data = clean_data(data)
-    log_csv(source, event, data)
+    log_csv(source, event, clean_data(data))
     print_progress(event, data)

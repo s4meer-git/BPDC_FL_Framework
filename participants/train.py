@@ -1,4 +1,5 @@
 import copy
+import math
 import torch
 import printer
 
@@ -46,11 +47,21 @@ def train_local(global_model, train_loader, config, client_id=None):
 
             predictions = local_model(images)
             loss = loss_function(predictions, labels)
+            batch_loss = loss.item()
+
+
+            # Stop at the first invalid loss so this client's weights are not updated with NaN or infinity.
+            if not math.isfinite(batch_loss):
+                raise ValueError(
+                    f"Non-finite training loss ({batch_loss}) for {config.method}: "
+                    f"round {getattr(config, 'current_round', 0)}, "
+                    f"client {client_id}, epoch {epoch + 1}, batch {no_of_batches + 1}. "
+                    "Check the training settings and the client's starting model."
+                )
 
             loss.backward()
             optimizer.step()
 
-            batch_loss = loss.item()
             total_loss += batch_loss
             no_of_batches += 1
 
