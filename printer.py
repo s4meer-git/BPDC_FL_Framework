@@ -144,6 +144,9 @@ def print_progress(event, data):
         else:
             print("Local epochs:", settings["local_epochs"])
 
+        if settings["method"].lower() == "fedmut" and settings["dataset"].lower() == "cifar10":
+            print("FedMut CIFAR-10 gradient norm limit:", settings.get("fedmut_cifar_grad_norm"))
+
     elif event == "dataset_loaded":
         print("Training samples:", data["training_samples"])
         print("Testing samples:", data["testing_samples"])

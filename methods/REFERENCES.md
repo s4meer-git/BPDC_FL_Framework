@@ -104,6 +104,16 @@ Mutation can extrapolate running statistics; the adapter does not clamp them.
 The model interface uses this framework's tensor logits instead of the authors'
 `{"output": logits}` dictionary.
 
+For CIFAR-10 only, local FedMut training now clips the combined gradient L2 norm
+to `config.fedmut_cifar_grad_norm = 10.0` before SGD. This is a framework stability
+adaptation, not an author-code feature. It was introduced after a saved failing
+client reproduced float32 overflow in both trainers. Shared training settings
+and mutation arithmetic remain unchanged. Each batch records its pre-clipping
+gradient norm and whether clipping occurred. Set this field to `None` when
+replaying the original unclipped method. Other datasets and methods do not use
+this clipping. New CIFAR-10 results should disclose the safeguard.
+
+
 ## Experiment settings and verification
 
 Both methods retain the framework's dataset, architecture, learning rate,

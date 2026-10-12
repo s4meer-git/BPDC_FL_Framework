@@ -73,6 +73,10 @@ class configuration:
         self.fedmut_bound = 50
 
 
+        # Limit exploding gradients only for FedMut on CIFAR-10; None reproduces the original unclipped trainer.
+        self.fedmut_cifar_grad_norm = 10.0
+
+
         # Use 0.1 for the authors' participation default.
         self.fedmut_fraction = 1.0
         self.fedmut_population = []

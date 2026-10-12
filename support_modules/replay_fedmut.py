@@ -63,6 +63,7 @@ def replay(archive, metadata, device, author):
     config = configuration()
     for name, value in metadata["settings"].items():
         setattr(config, name, value)
+    config.fedmut_cifar_grad_norm = metadata["settings"].get("fedmut_cifar_grad_norm")
     config.device = device
     config.current_round = metadata["round"]
     model = build_model(config.dataset)

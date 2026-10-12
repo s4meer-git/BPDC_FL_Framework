@@ -4,7 +4,6 @@ import random
 import numpy as np
 import torch
 import printer
-from support_modules.fedmut_diagnostics import check_tensors
 
 
 # Receives selected clients, mutation slots and population settings from FedMut functions; info passing to printer.py.
@@ -53,16 +52,7 @@ def train_fedmut_client(global_model, client, config):
     local_start = copy.deepcopy(global_model)
     slot = config.fedmut_client_slots[client.client_id]
     if config.fedmut_population:
-        check_tensors(
-            config, "assigned_population", config.fedmut_population[slot],
-            client_id=client.client_id, slot=slot,
-        )
         local_start.load_state_dict(config.fedmut_population[slot])
-
-    check_tensors(
-        config, "client_start", local_start.state_dict(),
-        client_id=client.client_id, slot=slot,
-    )
 
 
     # Client ID, assigned population slot and whether it starts from a mutated model; info passing to printer.py.
@@ -79,8 +69,6 @@ def train_fedmut_client(global_model, client, config):
 
 # fedmut() passes averaged weights and their change here to build the mutation population for the next round.
 def mutation_spread(global_weights, delta, count, round_index, config):
-    check_tensors(config, "before_mutation", global_weights, next_round=config.current_round + 1)
-    check_tensors(config, "mutation_delta", delta, next_round=config.current_round + 1)
     control_rate = config.fedmut_acc_rate * (
         1.0 - min(round_index / config.fedmut_bound, 1.0)
     )
@@ -108,7 +96,6 @@ def mutation_spread(global_weights, delta, count, round_index, config):
                 weights[name] = weights[name] + (
                     delta[name] * controls[name][slot] * config.fedmut_radius
                 )
-        check_tensors(config, "after_mutation", weights, slot=slot, next_round=config.current_round + 1)
         population.append(weights)
 
 
@@ -134,10 +121,6 @@ def fedmut(client_weights, client_sizes, global_model, clients, config):
     global_weights = {}
     delta = {}
     old_weights = global_model.state_dict()
-    check_tensors(config, "before_aggregation", old_weights)
-
-    for index, weights in enumerate(client_weights):
-        check_tensors(config, "client_update", weights, slot=index)
 
 
     # The author code averages all state entries equally, including buffers.

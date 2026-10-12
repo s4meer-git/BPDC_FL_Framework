@@ -2,8 +2,6 @@ import copy
 import math
 import torch
 import printer
-from support_modules.fedmut_diagnostics import check_tensors
-from support_modules.fedmut_snapshot import FailureSnapshot
 
 
 # Receives client, epoch, batch and loss values from train_local() before forwarding them; info passing to printer.py.
@@ -27,109 +25,105 @@ def train_local(global_model, train_loader, config, client_id=None):
     )
 
     loss_function = torch.nn.CrossEntropyLoss()
-    diagnose = config.method.lower() == "fedmut"
-
-    with FailureSnapshot(config, local_model, optimizer, client_id) as capture:
-        for epoch in range(config.local_epochs):
-            total_loss = 0.0
-            no_of_batches = 0
+    clip_norm = None
 
 
-            # The client ID and local epoch that is about to start; info passing to printer.py.
-            report_progress(
-                config,
-                "epoch_started",
-                client_id=client_id,
-                epoch=epoch + 1,
-            )
+    # Apply this safeguard only to FedMut on CIFAR-10; the shared SGD settings stay the same.
+    if config.method.lower() == "fedmut" and config.dataset.lower() == "cifar10":
+        clip_norm = config.fedmut_cifar_grad_norm
+        if clip_norm is not None and (not math.isfinite(clip_norm) or clip_norm <= 0):
+            raise ValueError("fedmut_cifar_grad_norm must be positive and finite, or None.")
 
-            for images, labels in train_loader:
-                images = images.to(config.device)
-                labels = labels.to(config.device)
-
-                capture.record_batch(images, labels, epoch + 1, no_of_batches + 1)
-
-                optimizer.zero_grad()
+    for epoch in range(config.local_epochs):
+        total_loss = 0.0
+        no_of_batches = 0
 
 
-                # Temporary FedMut checks record the input and starting weights for this exact training batch.
-                if diagnose:
-                    location = dict(client_id=client_id, epoch=epoch + 1, batch=no_of_batches + 1)
-                    check_tensors(config, "before_forward", local_model.state_dict(), **location)
-                    check_tensors(config, "input_batch", {"images": images, "labels": labels}, **location)
+        # The client ID and local epoch that is about to start; info passing to printer.py.
+        report_progress(
+            config,
+            "epoch_started",
+            client_id=client_id,
+            epoch=epoch + 1,
+        )
 
-                predictions = local_model(images)
+        for images, labels in train_loader:
+            images = images.to(config.device)
+            labels = labels.to(config.device)
 
-                if diagnose:
-                    outputs = {"predictions": predictions, **dict(local_model.named_buffers())}
-                    check_tensors(config, "after_forward", outputs, **location)
+            optimizer.zero_grad()
 
-                loss = loss_function(predictions, labels)
-                batch_loss = loss.item()
-
-                if diagnose:
-                    check_tensors(config, "loss", {"loss": loss}, **location)
-
-
-                # Stop at the first invalid loss so this client's weights are not updated with NaN or infinity.
-                if not math.isfinite(batch_loss):
-                    raise ValueError(
-                        f"Non-finite training loss ({batch_loss}) for {config.method}: "
-                        f"round {getattr(config, 'current_round', 0)}, "
-                        f"client {client_id}, epoch {epoch + 1}, batch {no_of_batches + 1}. "
-                        "Check the training settings and the client's starting model."
-                    )
-
-                loss.backward()
+            predictions = local_model(images)
+            loss = loss_function(predictions, labels)
+            batch_loss = loss.item()
 
 
-                # Temporary FedMut checks record gradients before SGD and weights and momentum immediately after it.
-                if diagnose:
-                    gradients = {name: parameter.grad for name, parameter in local_model.named_parameters()}
-                    check_tensors(config, "after_backward", gradients, **location)
-
-                optimizer.step()
-
-                if diagnose:
-                    updated = dict(local_model.state_dict())
-                    for name, parameter in local_model.named_parameters():
-                        state = optimizer.state.get(parameter, {})
-                        updated[f"momentum.{name}"] = state.get("momentum_buffer")
-                    check_tensors(config, "after_optimizer", updated, **location)
-
-                total_loss += batch_loss
-                no_of_batches += 1
-
-
-                # Client ID, epoch, batch loss, batch sample count and accumulated epoch loss; info passing to printer.py.
-                report_progress(
-                    config,
-                    "batch_completed",
-                    client_id=client_id,
-                    epoch=epoch + 1,
-                    batch=no_of_batches,
-                    loss=batch_loss,
-                    total_loss=total_loss,
-                    average_loss=total_loss / no_of_batches,
-                    batch_samples=labels.size(0),
+            # Stop at the first invalid loss so this client's weights are not updated with NaN or infinity.
+            if not math.isfinite(batch_loss):
+                raise ValueError(
+                    f"Non-finite training loss ({batch_loss}) for {config.method}: "
+                    f"round {getattr(config, 'current_round', 0)}, "
+                    f"client {client_id}, epoch {epoch + 1}, batch {no_of_batches + 1}. "
+                    "Check the training settings and the client's starting model."
                 )
 
-            if no_of_batches > 0:
-                average_loss = total_loss / no_of_batches
-            else:
-                average_loss = 0.0
+            loss.backward()
 
 
-            # Client ID, completed epoch, batch count and the average training loss; info passing to printer.py.
+            # Bound unusually large CIFAR-10 FedMut gradients before they enter SGD's momentum buffer.
+            gradient_data = {}
+            if clip_norm is not None:
+                try:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        local_model.parameters(), clip_norm, error_if_nonfinite=True,
+                    ).item()
+                except RuntimeError as error:
+                    raise ValueError(
+                        f"FedMut gradient check failed: round {config.current_round}, "
+                        f"client {client_id}, epoch {epoch + 1}, batch {no_of_batches + 1}."
+                    ) from error
+                gradient_data = {
+                    "gradient_norm_before_clip": grad_norm,
+                    "gradient_norm_limit": clip_norm,
+                    "gradient_clipped": grad_norm > clip_norm,
+                }
+
+            optimizer.step()
+
+            total_loss += batch_loss
+            no_of_batches += 1
+
+
+            # Client ID, epoch, batch loss, batch sample count and accumulated epoch loss; info passing to printer.py.
             report_progress(
                 config,
-                "epoch_completed",
+                "batch_completed",
                 client_id=client_id,
                 epoch=epoch + 1,
-                batches=no_of_batches,
+                batch=no_of_batches,
+                loss=batch_loss,
                 total_loss=total_loss,
-                average_loss=average_loss,
+                average_loss=total_loss / no_of_batches,
+                batch_samples=labels.size(0),
+                **gradient_data,
             )
+
+        if no_of_batches > 0:
+            average_loss = total_loss / no_of_batches
+        else:
+            average_loss = 0.0
+
+
+        # Client ID, completed epoch, batch count and the average training loss; info passing to printer.py.
+        report_progress(
+            config,
+            "epoch_completed",
+            client_id=client_id,
+            epoch=epoch + 1,
+            batches=no_of_batches,
+            total_loss=total_loss,
+            average_loss=average_loss,
+        )
 
     final_weights = {}
     for name, value in local_model.state_dict().items():
