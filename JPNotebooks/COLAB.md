@@ -14,7 +14,7 @@ MNIST and CIFAR-10 download automatically during the run. The dataset cell downl
 
 Run the training cell for one method. After it finishes, change the method in the settings cell and rerun from that cell onward. Keep the same dataset, experiment settings and comparison name to collect methods together.
 
-The analysis cell selects the three plotting cells for the current dataset from `Analysis.ipynb`. It reads all method CSVs in the selected comparison and saves those figures without running the other datasets' sections.
+In the analysis cell, set only `COMPARISON_NAME = "experiment_1"`. It automatically finds matching dataset folders inside `MyDrive/FLFrameWork/Results`, such as `experiment_1_mnist`, `experiment_1_cifar_10` and `experiment_1_tinyimagenet`; other comparisons are ignored. For each folder, it reads the dataset recorded in the CSVs and runs that dataset's three plotting cells from `Analysis.ipynb`. Folder names such as `experiment_1_cifar_10` work because the name does not determine the dataset. Empty folders are ignored; folders with incomplete, invalid or mixed-dataset CSVs are skipped with an explanation. You can run this cell after Drive and project setup without running training.
 
 For local analysis, `Analysis.ipynb` has separate Tiny ImageNet, MNIST and CIFAR-10 sections. Each has an editable loading cell followed by accuracy, loss-per-round and client-loss comparison cells. Run the section whose CSVs are available; an unrun dataset's section reports that its folder has no CSVs. Each section checks the recorded dataset so different datasets cannot be mixed accidentally.
 
@@ -27,9 +27,9 @@ The launcher creates `config = configuration()`, then overrides experiment setti
 For `COMPARISON_NAME = "experiment_1"` and MNIST:
 
 - CSVs: `MyDrive/FLFrameWork/Results/experiment_1_mnist/fedavg.csv`, and similarly for other methods.
-- PDFs: `MyDrive/FLFrameWork/CellResults/experiment_1_mnist/result_1/`, then `result_2/`, and so on.
+- PDFs: directly beside those CSVs in `MyDrive/FLFrameWork/Results/experiment_1_mnist/`: `average_client_accuracy_by_method.pdf`, `average_training_loss_by_round.pdf` and `average_client_training_loss_by_method.pdf`.
 
-A method rerun replaces its CSV, following the repository's existing behavior. Earlier methods and numbered figure folders are restored from Drive when you reconnect.
+A method rerun replaces its CSV, following the repository's existing behavior. Earlier method CSVs are restored from Drive when you reconnect. Rerunning Colab analysis replaces the three PDFs in each CSV folder. Local runs of `Analysis.ipynb` still save numbered folders under `JPNotebooks/CellResults`; older Drive `CellResults` folders are left in place.
 
 The training cell copies the CSV when it returns or Python reports an error/interruption. A forcibly terminated or disconnected runtime may not execute that copy. There is no checkpoint/resume support: a CSV records results, not the model, optimizer or method state. An incomplete CSV is rejected by the analysis.
 
