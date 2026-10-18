@@ -10,7 +10,7 @@ For local use, install PyTorch and torchvision for your machine, then install th
 
 The notebook starts with a five-round, one-seed smoke test. Set `SMOKE_TEST = False` for the experiment setup: 30 clients, 40 rounds, five local epochs and three seeds, summarised as mean ± standard deviation. Choose datasets and methods in lists, and use `config.selfishness = True` or `False` to compare attacked and honest runs. Completed matching runs are skipped by default. Incomplete runs restart from round 1; CSV files are not model checkpoints.
 
-Results follow one tree, `Results/<comparison>/<dataset>/<baseline|selfish>/seed_<n>/<method>.csv`, for example `Results/experiment_2/cifar10/baseline/seed_42/fedavg.csv`. Final plotting cells save PDFs beside these CSVs. On Colab, CSVs are backed up to Drive after every completed round and at the end; final PDFs are copied when you run their cells. Diagnostic plots and local testing files stay under ignored `temp/`.
+Results are saved as `Results/<dataset>/RUN1, RUN2, RUN3/<method>.csv` (one RUN per seed), for example `Results/tinyimagenet/RUN1/fedavg.csv`; selfish runs use `<dataset>_selfish` and smoke tests `smoke_<dataset>`. Final plotting cells save PDFs beside these CSVs. On Colab, CSVs are backed up to Drive after every completed round and at the end; final PDFs are copied when you run their cells. Diagnostic plots and local testing files stay under ignored `temp/`.
 
 See [the setup guide](JPNotebooks/SETUP.md) for settings, folders and synchronization. The separate [analysis notebook](JPNotebooks/Analysis.ipynb) remains available for older results, average accuracy/loss plots and final client testing accuracy.
 

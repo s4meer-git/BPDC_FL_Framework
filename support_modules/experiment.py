@@ -17,9 +17,8 @@ METHODS = ("fedavg", "fairrfl", "fedcda", "fedmut", "fcfl")
 
 
 # The notebook passes its settings and selections here; validate every planned run before spending training time.
-def prepare_runs(config, datasets, methods, comparison_name, results_root, momentum_by_dataset, seeds):
-    if not comparison_name or comparison_name in (".", "..") or Path(comparison_name).name != comparison_name:
-        raise ValueError("Use a comparison name, not a directory path.")
+# Results go to Results/<dataset>/RUN1, RUN2, ... (one RUN per seed, in SEEDS order), with one CSV per method.
+def prepare_runs(config, datasets, methods, results_root, momentum_by_dataset, seeds, smoke_test=False):
     if not datasets or not methods or len(set(datasets)) != len(datasets) or len(set(methods)) != len(methods):
         raise ValueError("Choose at least one dataset and method, without duplicates.")
     if not seeds or len(set(seeds)) != len(seeds):
@@ -28,7 +27,7 @@ def prepare_runs(config, datasets, methods, comparison_name, results_root, momen
 
 
     # Seeds run in the outer loop so every method finishes one seed before the next seed starts.
-    for seed in seeds:
+    for run_number, seed in enumerate(seeds, start=1):
         for dataset in datasets:
             for method in methods:
                 run_config = copy.deepcopy(config)
@@ -41,8 +40,13 @@ def prepare_runs(config, datasets, methods, comparison_name, results_root, momen
                 validate_config(run_config)
                 run_config.reset_run_state()
                 run_config.selfish_client_ids = choose_selfish_clients(run_config)
-                scenario = "selfish" if run_config.selfishness else "baseline"
-                folder = Path(results_root) / comparison_name / dataset / scenario / f"seed_{seed}"
+
+
+                # Selfish runs and smoke tests get their own dataset folder so they never mix with the full baseline.
+                dataset_folder = dataset + ("_selfish" if run_config.selfishness else "")
+                if smoke_test:
+                    dataset_folder = "smoke_" + dataset_folder
+                folder = Path(results_root) / dataset_folder / f"RUN{run_number}"
                 runs.append((run_config, folder))
     return runs
 
@@ -66,23 +70,22 @@ def check_existing_results(config, folder):
         if previous.get("method") != path.stem:
             raise ValueError(f"{path}: the filename does not match its recorded method.")
         if comparison_settings(previous) != comparison_settings(expected):
-            raise ValueError(f"{path}: shared settings differ. Choose a new comparison name.")
+            raise ValueError(f"{path}: shared settings differ from this run. Move or rename that folder to keep it, then run again.")
         if previous["method"] != config.method:
             continue
         defaults = {"fairrfl_dynamic_q": True}
         keys = [key for key in expected if key.startswith(config.method + "_")]
         changed = [key for key in keys if previous.get(key, defaults.get(key)) != expected[key]]
         if changed:
-            raise ValueError(f"{path}: method settings changed ({', '.join(changed)}). Choose a new comparison name.")
+            raise ValueError(f"{path}: method settings changed ({', '.join(changed)}). Move or rename that folder to keep it, then run again.")
 
 
-# Drive keeps the same tree as the local Results folder: comparison/dataset/scenario/seed_<n>.
-# A seed folder mirrors its last four parts; the scenario folder holding summary.csv mirrors three.
+# Drive keeps the same tree as the local Results folder: <dataset>/RUN<n>, with summary.csv in <dataset>.
 def backup_path(folder, backup_root):
     if backup_root is None:
         return None
     folder = Path(folder)
-    depth = 4 if folder.name.startswith("seed_") else 3
+    depth = 2 if folder.name.startswith("RUN") else 1
     return Path(backup_root).joinpath(*folder.parts[-depth:])
 
 

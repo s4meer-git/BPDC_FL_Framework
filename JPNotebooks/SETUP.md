@@ -11,8 +11,8 @@ Run the setup, storage and settings cells in order. The settings cell constructs
 - `DATASETS`: choose any combination of `mnist`, `cifar10`, `tinyimagenet`.
 - `METHODS`: default comparison is `fedavg`, `fairrfl`, `fedcda`, `fedmut`, `fcfl`.
 - `SEEDS`: `[42, 43, 44]` for the setup's three independent runs. Each seed changes the partition and the initial model, and every method uses the same ones for a given seed. The smoke test uses `SMOKE_SEEDS = [42]`.
-- `COMPARISON_NAME`: use a new name whenever you change settings or method variants.
-- `SMOKE_TEST = True`: five rounds, with `_smoke` added to the comparison name. This still uses the full dataset and chosen client count. It checks that training and attack histories work; it is not a final comparison.
+- To rerun a dataset with different settings, first move or rename its existing folder; the runner refuses to mix different settings in one folder.
+- `SMOKE_TEST = True`: five rounds, saved under `smoke_<dataset>`. This still uses the full dataset and chosen client count. It checks that training and attack histories work; it is not a final comparison.
 - `SMOKE_TEST = False`: the setup's 30 clients, 40 rounds, five local epochs, learning rate 0.01, momentum 0.5 for MNIST and 0.9 otherwise, and batch size 64.
 - `RERUN_COMPLETED = False`: skip matching completed method CSVs. Set it to `True` to replace them intentionally.
 
@@ -38,7 +38,7 @@ The seed fixes the client IDs without consuming the training random generator. T
 
 All five methods use the same attack rule and attacker selection. FairRFL applies it after fairness weighting and before recovery; the other methods apply it to trained parameters before aggregation. Buffers are not attacked. Full participation is required for the current attack-history implementation.
 
-FairRFL keeps the paper's dynamic q and recovery, and weights clients by the received global model's loss as in its Algorithm 3. `fairrfl_dynamic_q = False` holds q constant, and `fairrfl_lipschitz` fixes the q-FFL constant instead of estimating it from the local SGD steps. Name a new comparison if you change either. The optional diagnostic cell shows the global update size alongside the median local update size. A very small global step can reveal stalled aggregation even when local training loss falls. It is a diagnostic, not a convergence test.
+FairRFL keeps the paper's dynamic q and recovery, and weights clients by the received global model's loss as in its Algorithm 3. `fairrfl_dynamic_q = False` holds q constant, and `fairrfl_lipschitz` fixes the q-FFL constant instead of estimating it from the local SGD steps. Move or rename the existing dataset folder before rerunning with either change. The optional diagnostic cell shows the global update size alongside the median local update size. A very small global step can reveal stalled aggregation even when local training loss falls. It is a diagnostic, not a convergence test.
 
 An attack does not guarantee FairRFL will be best or that any method will remain numerically stable. The framework stops on invalid values rather than generating ordinary-looking scores. The final plots display measured accuracy without adjusting or sorting points to favor a method. Read mean accuracy, worst-client accuracy and standard deviation together; a low spread alone can mean uniformly poor accuracy.
 
@@ -46,20 +46,21 @@ An attack does not guarantee FairRFL will be best or that any method will remain
 
 The training cell runs each selected method for each dataset. It checks all planned configurations and existing folders before training. Matching completed results are reused; incomplete runs restart at round 1. There is no model/optimizer checkpoint resume.
 
-For comparison `experiment_2`, CIFAR-10, the baseline scenario and seed 42:
+Results are saved by dataset, with one RUN folder per seed (RUN1 is the first seed in `SEEDS`):
 
 ```text
 Results/
-└── experiment_2/                    COMPARISON_NAME (experiment_2_smoke for a smoke test)
-    └── cifar10/                     dataset
-        └── baseline/                baseline, or selfish when config.selfishness = True
-            ├── seed_42/
-            │   ├── fedavg.csv  fairrfl.csv  fedcda.csv  fedmut.csv  fcfl.csv
-            │   ├── final_test_accuracy_all_methods.pdf
-            │   └── final_test_accuracy_fairrfl.pdf   (optional single-method cell)
-            ├── seed_43/  seed_44/
-            ├── summary.csv            Table II: mean ± sample std over seeds
-            └── summary_per_seed.csv
+├── tinyimagenet/                 full baseline run
+│   ├── RUN1/                     seed 42
+│   │   ├── fedavg.csv  fairrfl.csv  fedcda.csv  fedmut.csv  fcfl.csv
+│   │   ├── final_test_accuracy_all_methods.pdf
+│   │   └── final_test_accuracy_fairrfl.pdf   (optional single-method cell)
+│   ├── RUN2/                     seed 43
+│   ├── RUN3/                     seed 44
+│   ├── summary.csv               Table II: mean ± sample std over the RUNs
+│   └── summary_per_seed.csv
+├── tinyimagenet_selfish/         same layout, config.selfishness = True
+└── smoke_tinyimagenet/           same layout, SMOKE_TEST = True
 ```
 
 - The settings cell prints every CSV path a run will write before training starts.
@@ -71,7 +72,7 @@ Repeating a plotting cell replaces that plot's PDF.
 
 On Colab, the current CSV is copied after each fully evaluated round and when training exits normally or with a Python exception. A hard runtime termination can lose work since the latest successful copy. A copied partial CSV is useful for diagnostics but is rejected by final analysis. Backup failures print the local path so you can retrieve it. Local use does not mount Drive.
 
-After reconnecting, the runner restores missing method CSVs from the matching Drive folder. To generate final figures without training again, run the setup, storage and settings cells, then the plotting cell directly. Use the same experiment settings and comparison name that produced the CSVs. All selected methods must exist and have complete results. Diagnostic plots can inspect incomplete runs.
+After reconnecting, the runner restores missing method CSVs from the matching Drive folder. To generate final figures without training again, run the setup, storage and settings cells, then the plotting cell directly. Use the same settings that produced the CSVs. All selected methods must exist and have complete results. Diagnostic plots can inspect incomplete runs.
 
 For older experiments with folders such as `Results_GColab/experiment_1_cifar10`, use the final two cells in `Analysis.ipynb` and set the folder and filenames there. Its earlier sections retain the average accuracy and loss plots. Analysis reads the settings in the CSVs, not today's configuration, and rejects mismatched scenarios or missing clients/rounds.
 
