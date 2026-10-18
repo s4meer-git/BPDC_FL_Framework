@@ -39,20 +39,88 @@ def read_run(data, filename):
     rounds = whole_number(settings["rounds"], f"{filename}: rounds", 1)
     clients = whole_number(settings["num_of_clients"], f"{filename}: clients", 1)
     settings = dict(settings, method=method, rounds=rounds, num_of_clients=clients)
+    settings.setdefault("selfishness", False)
+    settings.setdefault("selfish_client_ids", [])
+    if type(settings["selfishness"]) is not bool:
+        raise ValueError(f"{filename}: selfishness must be recorded as True or False.")
+    ids = settings["selfish_client_ids"]
+    if not isinstance(ids, list) or any(type(i) is not int or not 0 <= i < clients for i in ids) or len(ids) != len(set(ids)):
+        raise ValueError(f"{filename}: invalid selfish client IDs.")
+    if settings["selfishness"]:
+        if not ids or settings.get("selfish_attack") != "known_client_count_v1":
+            raise ValueError(f"{filename}: selfish attack settings are missing or unsupported.")
+        start = whole_number(settings.get("selfish_start_round"), f"{filename}: attack start", 2)
+        fraction = settings.get("selfish_fraction", 0)
+        strength = settings.get("selfish_strength", 0)
+        if not 0 < fraction < 0.5 or not 0 < strength <= 1 or len(ids) != max(1, int(clients * fraction)):
+            raise ValueError(f"{filename}: invalid selfish fraction, strength or client count.")
+        if start > rounds:
+            raise ValueError(f"{filename}: no configured round actually applies the attack.")
+    elif ids:
+        raise ValueError(f"{filename}: a baseline run must not list selfish clients.")
     return settings
+
+
+# Analysis and the launcher use these shared settings to keep different experiments out of the same comparison.
+def comparison_settings(settings):
+    names = ("dataset", "model", "num_of_clients", "rounds", "local_epochs", "batch_size", "lr", "momentum", "seed", "dirichlet_alpha")
+    result = {name: settings.get(name) for name in names}
+    result["test_partition"] = settings.get("test_partition", "dirichlet")
+    result["selfishness"] = settings.get("selfishness", False)
+    if result["selfishness"]:
+        for name in ("selfish_fraction", "selfish_strength", "selfish_start_round", "selfish_attack"):
+            result[name] = settings.get(name)
+        result["selfish_client_ids"] = sorted(settings.get("selfish_client_ids", []))
+    return result
+
+
+# Plotting cells pass all selected CSVs here before combining methods from one comparison.
+def comparison_runs(csv_data):
+    runs = {name: read_run(data, name) for name, data in csv_data.items()}
+    reference = None
+    for filename, settings in runs.items():
+        current = comparison_settings(settings)
+        if reference is not None and current != reference:
+            changed = [name for name in current if current[name] != reference.get(name)]
+            raise ValueError(f"{filename}: comparison settings differ: {', '.join(changed)}. Keep these runs in separate folders.")
+        reference = current
+    return runs
 
 
 # Cell 2 sends all loaded CSVs here; each recorded client must have exactly one accuracy in every configured round.
 def client_accuracies(csv_data):
     frames = []
     seen_methods = set()
+    runs = comparison_runs(csv_data)
 
     for filename, data in csv_data.items():
-        settings = read_run(data, filename)
+        settings = runs[filename]
         method = settings["method"]
         if method in seen_methods:
             raise ValueError(f"{filename}: more than one CSV contains results for {method}.")
         seen_methods.add(method)
+
+        attack_rows = data[data["event"] == "selfish_round"]
+        if settings["selfishness"]:
+            seen_rounds = set()
+            for row in attack_rows.itertuples():
+                round_number = whole_number(row.round_number, f"{filename}: attack round", 1)
+                attack = json.loads(row.data)
+                active = round_number >= settings["selfish_start_round"]
+
+
+                # An attacker with zero aggregation weight that round (an FCFL queue of zero) sends its honest update.
+                attacked = set(attack["attacked_client_ids"])
+                if (round_number in seen_rounds or not attacked <= set(settings["selfish_client_ids"])
+                        or (not active and attacked) or (active and settings["method"] != "fcfl" and attacked != set(settings["selfish_client_ids"]))
+                        or sorted(attack["selfish_client_ids"]) != sorted(settings["selfish_client_ids"])
+                        or attack.get("active") is not (round_number >= settings["selfish_start_round"])):
+                    raise ValueError(f"{filename}: inconsistent selfish attack record in round {round_number}.")
+                seen_rounds.add(round_number)
+            if seen_rounds != set(range(1, settings["rounds"] + 1)):
+                raise ValueError(f"{filename}: missing selfish attack rounds.")
+        elif not attack_rows.empty:
+            raise ValueError(f"{filename}: attack records appear in a baseline run.")
 
         rows = data.loc[data["event"] == "round_client_accuracy"].copy()
         for name in ("round_number", "client_id"):
@@ -97,6 +165,8 @@ def training_schedule(data, settings, filename):
         participant_count = settings.get("fedcda_clients_per_round") or participant_count
     elif settings["method"] == "fedmut":
         participant_count = max(int(participant_count * float(settings["fedmut_fraction"])), 1)
+    elif settings["method"] == "fcfl":
+        participant_count = max(int(participant_count * float(settings["fcfl_fraction"])), 1)
     participant_count = whole_number(participant_count, f"{filename}: participating clients", 1)
 
     schedule = {}
@@ -128,17 +198,13 @@ def training_losses(csv_data):
         sizes, schedule = training_schedule(data, settings, filename)
         method = settings["method"]
         batch_size = whole_number(settings["training_batch_size"], f"{filename}: batch size", 1)
-        epochs = 1 if method == "fairmedian" else whole_number(settings["local_epochs"], f"{filename}: epochs", 1)
+        epochs = whole_number(settings["local_epochs"], f"{filename}: epochs", 1)
         expected_batches = {}
         expected_epochs = {}
 
         for round_number, clients in schedule.items():
             for client_id in clients:
                 samples = sizes[client_id]
-                if method == "fairmedian":
-                    expected_batches[(round_number, client_id, 0, 1)] = min(samples, batch_size)
-                    continue
-
                 batches = math.ceil(samples / batch_size)
                 for epoch in range(1, epochs + 1):
                     expected_epochs[(round_number, client_id, epoch)] = batches
@@ -148,19 +214,12 @@ def training_losses(csv_data):
                         expected_batches[key] = min(batch_size, remaining)
 
         seen = set()
-        events = data[data["event"].isin(["batch_completed", "gradient_collected"])]
+        events = data[data["event"] == "batch_completed"]
         for row in events.itertuples():
             round_number = whole_number(row.round_number, f"{filename}: loss round", 1)
             client_id = whole_number(row.client_id, f"{filename}: loss client")
-            if method == "fairmedian":
-                if row.event != "gradient_collected":
-                    raise ValueError(f"{filename}: unexpected training event for FairMedian.")
-                epoch, batch = 0, 1
-            else:
-                if row.event != "batch_completed":
-                    raise ValueError(f"{filename}: unexpected gradient event for {method}.")
-                epoch = whole_number(row.epoch, f"{filename}: epoch", 1)
-                batch = whole_number(row.batch, f"{filename}: batch", 1)
+            epoch = whole_number(row.epoch, f"{filename}: epoch", 1)
+            batch = whole_number(row.batch, f"{filename}: batch", 1)
 
             key = (round_number, client_id, epoch, batch)
             values = json.loads(row.data)
@@ -200,3 +259,49 @@ def training_losses(csv_data):
     if not loss_rows:
         raise ValueError("No training losses were loaded.")
     return pd.DataFrame(loss_rows)
+
+
+# The summary cell passes each seed's method CSVs here; Table II reports final-round metrics as mean ± sample std over seeds.
+def seed_summary(csv_by_seed):
+    rows = []
+    reference = None
+
+    for csv_data in csv_by_seed.values():
+        runs = comparison_runs(csv_data)
+        for filename, data in csv_data.items():
+            settings = runs[filename]
+            shared = comparison_settings(settings)
+            shared.pop("seed")
+            shared.pop("selfish_client_ids", None)
+            if reference is None:
+                reference = shared
+            elif shared != reference:
+                raise ValueError(f"{filename}: settings other than the seed differ from the other runs.")
+
+            final = data[data["event"] == "final_results"]
+            if len(final) != 1:
+                raise ValueError(f"{filename}: expected one final_results record.")
+            metrics = json.loads(final.iloc[0]["data"])["metrics"]
+            rows.append({
+                "method": settings["method"],
+                "seed": settings["seed"],
+                "ACC (%)": 100 * metrics["global_accuracy"],
+                "Mean Client ACC (%)": 100 * metrics["mean_client_accuracy"],
+                "Worst Client ACC (%)": 100 * metrics["worst_client_accuracy"],
+                "Client Std. (%)": 100 * metrics["client_standard_deviation"],
+                "JFI": metrics["jain_fairness_index"],
+            })
+
+    table = pd.DataFrame(rows)
+    seeds = set(table["seed"])
+    for method, method_seeds in table.groupby("method")["seed"]:
+        if len(method_seeds) != len(set(method_seeds)):
+            raise ValueError(f"{method}: more than one completed run for the same seed.")
+
+
+    # Mean ± std needs every seed; a method that diverged in some seeds is listed separately instead of averaged.
+    counts = table.groupby("method")["seed"].nunique()
+    partial = {method: sorted(seeds - set(table.loc[table["method"] == method, "seed"])) for method in counts.index[counts < len(seeds)]}
+    complete = table[~table["method"].isin(partial)]
+    grouped = complete.drop(columns="seed").groupby("method")
+    return grouped.mean(), grouped.std(ddof=1), table, partial

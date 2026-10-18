@@ -2,7 +2,7 @@ import torch
 from torch.nn.modules.batchnorm import _BatchNorm
 
 
-# FairRFL and FairMedian pass local BatchNorm buffers here alongside the newly aggregated parameters.
+# FairRFL passes local BatchNorm buffers here alongside the newly aggregated parameters.
 def merge_batchnorm_buffers(new_weights, global_model, client_weights, client_sizes):
     total_samples = sum(client_sizes)
 

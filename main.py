@@ -1,4 +1,5 @@
 from collections import Counter
+import torch
 from torch.random import fork_rng
 from torch.utils.data import DataLoader, Subset
 
@@ -6,12 +7,14 @@ import printer
 
 from configuration import configuration
 from datasets.loaders import load_dataset, get_dataset_labels
-from datasets.partition import dirichlet_partition
+from datasets.partition import dirichlet_partition, matching_partition
 from models.model_selector import build_model
 from participants.client import Clients
 from participants.server import run_one_round
 from analysis.metrics import accuracy, calculate_fairness_metrics
 from support_modules.seed import set_seed
+from support_modules.validation import validate_config
+from support_modules.selfishness import choose_selfish_clients
 
 
 # Receives settings, client partitions and accuracy results from functions in main.py; info passing to printer.py.
@@ -30,12 +33,23 @@ def create_clients(train_dataset, test_dataset, config):
         config.dirichlet_alpha,
         config.seed
     )
-    test_partitions = dirichlet_partition(
-        test_labels,
-        config.num_of_clients,
-        config.dirichlet_alpha,
-        config.seed + 1
-    )
+
+
+    # "matched" tests each client on its own training class mix; "dirichlet" keeps the earlier independent test split.
+    if config.test_partition == "matched":
+        test_partitions = matching_partition(
+            test_labels,
+            train_labels,
+            train_partitions,
+            config.seed + 1
+        )
+    else:
+        test_partitions = dirichlet_partition(
+            test_labels,
+            config.num_of_clients,
+            config.dirichlet_alpha,
+            config.seed + 1
+        )
 
     clients = []
 
@@ -45,6 +59,10 @@ def create_clients(train_dataset, test_dataset, config):
                 f"Client {client_id} has no training samples. "
                 "Use fewer clients or increase dirichlet_alpha."
             )
+
+    for client_id, indices in enumerate(test_partitions):
+        if not indices:
+            raise ValueError(f"Client {client_id} has no test samples; its accuracy cannot be used in a fairness comparison.")
 
     for client_id in range(config.num_of_clients):
         client_train_dataset = Subset(
@@ -60,7 +78,7 @@ def create_clients(train_dataset, test_dataset, config):
 
         train_loader = DataLoader(
             client_train_dataset,
-            batch_size=config.get_training_batch_size(),
+            batch_size=config.batch_size,
             shuffle=True
         )
         test_loader = DataLoader(
@@ -96,7 +114,7 @@ def create_clients(train_dataset, test_dataset, config):
 
 
 # Start an experiment with the supplied config and chosen results folder, or use the default configuration.
-def main(config=None, output_directory=None):
+def main(config=None, output_directory=None, round_callback=None):
     if config is None:
         config = configuration()
 
@@ -104,17 +122,17 @@ def main(config=None, output_directory=None):
 
     if config.num_of_clients < 1:
         raise ValueError("The number of clients must be positive.")
-    if method not in {"fedavg", "fairrfl", "fairmedian", "fedcda", "fedmut"}:
+    if method not in {"fedavg", "fairrfl", "fedcda", "fedmut", "fcfl"}:
         raise ValueError("Unknown method name: " + config.method)
-    if method == "fairmedian" and config.num_of_clients % 2 == 0:
-        raise ValueError("FairMedian requires an odd number of clients.")
-    config.current_round = 0
+    validate_config(config)
+    config.reset_run_state()
+    config.selfish_client_ids = choose_selfish_clients(config)
 
 
     # Training settings and the folder chosen for this comparison's method CSVs; info passing to printer.py.
     printer.start_run(config, output_directory)
     try:
-        metrics = _run_experiment(config)
+        metrics = _run_experiment(config, round_callback)
 
 
         # The method CSV that contains this run's progress and final results; info passing to printer.py.
@@ -142,7 +160,7 @@ def main(config=None, output_directory=None):
 
 
 # main() supplies the config used to load datasets, train the rounds and calculate the final scores.
-def _run_experiment(config):
+def _run_experiment(config, round_callback=None):
     set_seed(config.seed)
 
 
@@ -172,7 +190,12 @@ def _run_experiment(config):
         shuffle=False
     )
 
-    global_model = build_model(config.dataset)
+
+
+    # Reseed only for model creation so every method starts from the same initial weights for this seed.
+    with fork_rng(devices=[]):
+        torch.manual_seed(config.seed)
+        global_model = build_model(config.dataset)
     global_model = global_model.to(config.device)
 
 
@@ -242,6 +265,11 @@ def _run_experiment(config):
                     testing_samples=len(client.test_loader.dataset),
                 )
 
+
+        # The launcher backs up the current CSV after each fully evaluated round.
+        if round_callback is not None:
+            round_callback()
+
     client_accuracies = []
 
 
@@ -287,6 +315,14 @@ def _run_experiment(config):
 
     metrics["client_accuracies"] = client_accuracies
 
+    if config.selfishness:
+        honest = [client for client in clients if client.client_id not in config.selfish_client_ids]
+        honest_scores = [client_accuracies[client.client_id] for client in honest]
+        honest_sizes = [len(client.test_loader.dataset) for client in honest]
+        honest_accuracy = sum(score * size for score, size in zip(honest_scores, honest_sizes)) / sum(honest_sizes)
+        metrics["honest_clients"] = calculate_fairness_metrics(honest_accuracy, honest_scores)
+        metrics["selfish_client_ids"] = config.selfish_client_ids
+
 
     # Final global/client accuracies, fairness metrics and their matching client IDs; info passing to printer.py.
     report_progress(
@@ -300,7 +336,4 @@ def _run_experiment(config):
 
 
 if __name__ == "__main__":
-
-
-    # Ask where this comparison's method CSVs should be saved before starting training.
-    main(output_directory=printer.choose_directory())
+    raise SystemExit("Open JPNotebooks/setup_remote.ipynb to configure, run and analyse an experiment.")

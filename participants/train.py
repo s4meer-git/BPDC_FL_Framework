@@ -79,7 +79,7 @@ def train_local(global_model, train_loader, config, client_id=None):
                     ).item()
                 except RuntimeError as error:
                     raise ValueError(
-                        f"FedMut gradient check failed: round {config.current_round}, "
+                        f"FedMut gradient check failed (non-finite gradient): round {config.current_round}, "
                         f"client {client_id}, epoch {epoch + 1}, batch {no_of_batches + 1}."
                     ) from error
                 gradient_data = {

@@ -10,3 +10,7 @@ JPNotebooks/CellResults/
 .reference/
 FULL_AUDIT_REPORT.md
 notes.txt
+
+# Local checks and diagnostic outputs stay outside version control.
+/temp/
+/Results_GColab/

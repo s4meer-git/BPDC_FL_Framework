@@ -1,29 +1,19 @@
 # BPDC FL Framework
 
-A PyTorch federated learning framework with FedAvg, FairRFL, FairMedian, FedCDA and FedMut, plus MNIST, CIFAR-10 and Tiny ImageNet loaders.
+A PyTorch federated learning framework with FedAvg, FairRFL, FedCDA, FedMut and FCFL, using MNIST, CIFAR-10 or Tiny ImageNet.
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/s4meer-git/BPDC_FL_Framework/blob/main/JPNotebooks/Colab.ipynb)
+[![Open setup notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/s4meer-git/BPDC_FL_Framework/blob/main/JPNotebooks/setup_remote.ipynb)
 
-## Run on Google Colab
+Open **[JPNotebooks/setup_remote.ipynb](JPNotebooks/setup_remote.ipynb)** to configure and run the framework locally or remotely. It creates the configuration, prepares datasets, runs the selected methods, and provides optional diagnostic and final plotting cells. `main.py` is the training engine called by the notebook.
 
-Open the notebook above, select **Runtime → Change runtime type → GPU**, and run the cells in order. The launcher clones this repository, connects Drive, lets you choose one method and dataset, and saves method CSVs and analysis PDFs.
+For local use, install PyTorch and torchvision for your machine, then install the notebook dependencies with `python -m pip install -r JPNotebooks/requirements.txt`. Open the notebook using your Python environment in Jupyter or VS Code. For Colab, select a GPU runtime; setup keeps the existing PyTorch installation and mounts Drive for result backups.
 
-Start with a short run to measure the assigned GPU's speed. The launcher's experiment preset uses 31 clients, 40 rounds and 5 local epochs. Each method runs separately, and a rerun replaces that method's CSV in the chosen comparison folder.
+The notebook starts with a five-round, one-seed smoke test. Set `SMOKE_TEST = False` for the experiment setup: 30 clients, 40 rounds, five local epochs and three seeds, summarised as mean ± standard deviation. Choose datasets and methods in lists, and use `config.selfishness = True` or `False` to compare attacked and honest runs. Completed matching runs are skipped by default. Incomplete runs restart from round 1; CSV files are not model checkpoints.
 
-See [the Colab guide](JPNotebooks/COLAB.md) for the complete workflow, saved-file locations and GitHub synchronization.
+CSV folders include the comparison name, dataset, scenario and seed, for example `Results/experiment_2_cifar10_baseline/seed_42/fedavg.csv`. Final plotting cells save PDFs beside these CSVs. On Colab, CSVs are backed up to Drive after every completed round and at the end; final PDFs are copied when you run their cells. Diagnostic plots and local testing files stay under ignored `temp/`.
 
-## Run locally
+See [the setup guide](JPNotebooks/SETUP.md) for settings, folders and synchronization. The separate [analysis notebook](JPNotebooks/Analysis.ipynb) remains available for older results, average accuracy/loss plots and final client testing accuracy.
 
-Use an environment with PyTorch, torchvision and NumPy installed. Install the notebook dependencies with `python -m pip install -r JPNotebooks/requirements.txt`.
+See [method references](methods/REFERENCES.md) for the authors, equations and adaptations. Introducing selfish clients does not guarantee a particular ranking. Compare mean accuracy, worst-client accuracy and client standard deviation together, including the honest-client group.
 
-Choose your settings in `configuration.py`, then run `python main.py` from the project root. Device selection uses CUDA when available, otherwise MPS. MNIST and CIFAR-10 download automatically; Tiny ImageNet should be extracted into `data/tiny-imagenet-200`.
-
-The analysis notebook is `JPNotebooks/Analysis.ipynb`. Choose the Tiny ImageNet, MNIST or CIFAR-10 section, select its method CSV folder in the loading cell, and run that section's three plotting cells. It checks run completeness and exports accuracy and loss PDFs.
-
-## Methods and experiment limits
-
-See [method references](methods/REFERENCES.md) for original authors, papers and the framework's adaptations. FairMedian uses one minibatch per client per round and needs an odd client count. FedCDA starts history search after its configured warmup. These settings matter when comparing methods.
-
-This repository does not include dataset downloads, virtual environments or saved experiments. It does not implement checkpoint/resume: saved CSVs contain measurements, not restorable training state.
-
-The project license is [MIT](LICENSE). The adapted FedMut code retains its original [MIT notice](LICENSE.FedMut).
+Datasets, virtual environments and saved experiments are not part of the source distribution. The project license is [MIT](LICENSE); the adapted FedMut code retains its original [MIT notice](LICENSE.FedMut).

@@ -1,8 +1,10 @@
 import copy
+import itertools
 import random
 import math
 
 import torch
+from torch.random import fork_rng
 import printer
 
 
@@ -68,7 +70,10 @@ def train_fedcda_client(global_model, client, config):
     total_samples = 0
     loss_function = torch.nn.CrossEntropyLoss(reduction="sum")
 
-    with torch.no_grad():
+
+
+    # Keep the training shuffle and augmentation randomness identical to the other methods.
+    with torch.no_grad(), fork_rng(devices=[]):
         for images, labels in client.train_loader:
             predictions = local_model(images.to(config.device))
             loss = loss_function(predictions, labels.to(config.device))
@@ -95,32 +100,63 @@ def train_fedcda_client(global_model, client, config):
     return weights, sample_count
 
 
-# The history search supplies selected models and their measured losses to evaluate the paper's Equation (5).
-def history_score(history, losses, choices, parameter_names, smoothness):
-    selected = [models[choices[client_id]] for client_id, models in history.items()]
-    count = len(selected)
-    divergence = 0.0
+# fedcda() supplies one client group here and gets back the best history choices for the paper's Equation (5).
+def search_history(history, losses, choices, batch, parameter_names, smoothness, config=None):
+    fixed_ids = [client_id for client_id in history if client_id not in batch]
+    count = len(history)
+    candidates = [
+        (client_id, index)
+        for client_id in batch
+        for index in range(len(history[client_id]))
+    ]
+
+
+    # Sum(||w_i - center||^2) = sum(||w_i||^2) - ||sum(w_i)||^2 / count, so one pass collects every dot product needed.
+    gram = torch.zeros(len(candidates), len(candidates), dtype=torch.float64)
+    fixed_dot = torch.zeros(len(candidates), dtype=torch.float64)
+    fixed_square = 0.0
+    fixed_norms = 0.0
 
     for name in parameter_names:
-        values = [weights[name].detach().cpu().double() for weights in selected]
-        center = sum(values) / count
-        for value in values:
-            divergence += (value - center).square().sum().item()
+        stacked = torch.stack([
+            history[client_id][index][name].reshape(-1).double()
+            for client_id, index in candidates
+        ])
+        fixed_sum = torch.zeros(stacked.shape[1], dtype=torch.float64)
+        for client_id in fixed_ids:
+            value = history[client_id][choices[client_id]][name].reshape(-1).double()
+            fixed_sum += value
+            fixed_norms += value.dot(value).item()
+        gram += stacked @ stacked.T
+        fixed_dot += stacked @ fixed_sum
+        fixed_square += fixed_sum.dot(fixed_sum).item()
 
-    mean_loss = sum(losses[client_id][choices[client_id]] for client_id in history) / count
-    score = mean_loss + smoothness * divergence / (2 * count)
-    if not math.isfinite(score):
-        raise ValueError("FedCDA history search produced a non-finite score.")
-    return score
+    fixed_loss = sum(losses[client_id][choices[client_id]] for client_id in fixed_ids)
+    offsets = {}
+    for position, (client_id, index) in enumerate(candidates):
+        offsets.setdefault(client_id, []).append(position)
+
+    best_score = float("inf")
+    best_path = None
 
 
-# fedcda() supplies one client group here; each recursive branch keeps the best score found so far.
-def search_history(
-    history, losses, choices, batch, depth, path, best_score,
-    parameter_names, smoothness, config=None,
-):
-    if depth == len(batch):
-        score = history_score(history, losses, path, parameter_names, smoothness)
+    # Visit candidates in the same nested order as the authors' recursive search; only a strictly lower score wins.
+    for path in itertools.product(*[range(len(history[client_id])) for client_id in batch]):
+        positions = [offsets[client_id][index] for client_id, index in zip(batch, path)]
+        chosen = torch.tensor(positions)
+        own_norms = gram[chosen, chosen].sum().item()
+        total_square = (
+            fixed_square
+            + 2 * fixed_dot[chosen].sum().item()
+            + gram[chosen][:, chosen].sum().item()
+        )
+        divergence = fixed_norms + own_norms - total_square / count
+        mean_loss = (fixed_loss + sum(
+            losses[client_id][index] for client_id, index in zip(batch, path)
+        )) / count
+        score = mean_loss + smoothness * divergence / (2 * count)
+        if not math.isfinite(score):
+            raise ValueError("FedCDA history search produced a non-finite score.")
         if config is not None:
 
 
@@ -128,24 +164,17 @@ def search_history(
             report_progress(
                 config,
                 "fedcda_candidate",
-                choices=path,
+                choices=dict(zip(batch, path)),
                 score=score,
                 improved=bool(score < best_score),
                 batch_client_ids=batch,
             )
 
         if score < best_score:
-            choices.update(path)
-            return score
-        return best_score
+            best_score = score
+            best_path = path
 
-    client_id = batch[depth]
-    for index in range(len(history[client_id])):
-        path[client_id] = index
-        best_score = search_history(
-            history, losses, choices, batch, depth + 1, path, best_score,
-            parameter_names, smoothness, config,
-        )
+    choices.update(zip(batch, best_path))
     return best_score
 
 
@@ -194,7 +223,7 @@ def fedcda(client_weights, client_sizes, global_model, clients, config):
             # Equation (8) includes inactive clients and groups already visited; later groups enter when their turn arrives.
             search_models = {client_id: history[client_id] for client_id in included_ids}
             search_history(
-                search_models, losses, choices, batch, 0, choices.copy(), float("inf"),
+                search_models, losses, choices, batch,
                 parameter_names, config.fedcda_smoothness, config,
             )
 

@@ -1,8 +1,10 @@
 import copy
 import torch
+from torch.random import fork_rng
 import numpy as np
 import printer
 from support_modules.batchnorm import merge_batchnorm_buffers
+from support_modules.selfishness import attack_vectors
 
 
 # Receives local losses, fairness weights and recovery statistics from the FairRFL functions; info passing to printer.py.
@@ -10,105 +12,48 @@ def report_progress(config, event, **data):
     printer.report("methods.fairrfl", event, config=config, **data)
 
 
-# config.train_client() passes the model and client here to train locally and sum losses as in the authors' utils.py.
+# config.train_client() passes the model and client here; Dq-FFL needs the received model's loss before local training.
 def train_fairrfl_client(global_model, client, config):
+    global_loss = global_model_loss(global_model, client.train_loader, config)
+    updated_weights, no_of_samples = client.train(global_model, config)
+
+    config.fairrfl_client_losses[client.client_id] = global_loss
+    config.fairrfl_local_steps[client.client_id] = config.local_epochs * len(client.train_loader)
 
 
-    # This client ID and the number of training samples in its loader; info passing to printer.py.
+    # Client ID, received-model training loss and the local SGD steps used for L; info passing to printer.py.
     report_progress(
         config,
-        "client_started",
+        "fairrfl_client_loss",
         client_id=client.client_id,
-        training_samples=len(client.train_loader.dataset),
-    )
-
-    local_model = copy.deepcopy(global_model)
-    local_model = local_model.to(config.device)
-    local_model.train()
-    loss_function = torch.nn.CrossEntropyLoss()
-    client_loss = 0.0
-
-    for epoch in range(config.local_epochs):
-        no_of_batches = 0
-        loss_before_epoch = client_loss
-
-
-        # The client ID and local epoch that is about to start; info passing to printer.py.
-        report_progress(
-            config,
-            "epoch_started",
-            client_id=client.client_id,
-            epoch=epoch + 1,
-        )
-
-        for images, labels in client.train_loader:
-            images = images.to(config.device)
-            labels = labels.to(config.device)
-
-
-            # The authors create the optimizer again for each batch, so its momentum state starts fresh each time.
-            optimizer = torch.optim.SGD(
-                local_model.parameters(),
-                lr=config.lr,
-                momentum=0.9,
-                weight_decay=0.0005
-            )
-            optimizer.zero_grad()
-            predictions = local_model.forward(images)
-            loss = loss_function(predictions, labels)
-            loss.backward()
-            batch_loss = loss.item()
-            client_loss += batch_loss
-            optimizer.step()
-            no_of_batches += 1
-
-
-            # Client ID, epoch, batch loss, sample count and the accumulated FairRFL loss; info passing to printer.py.
-            report_progress(
-                config,
-                "batch_completed",
-                client_id=client.client_id,
-                epoch=epoch + 1,
-                batch=no_of_batches,
-                loss=batch_loss,
-                client_loss=client_loss,
-                total_loss=client_loss - loss_before_epoch,
-                batch_samples=labels.size(0),
-            )
-
-        epoch_loss = client_loss - loss_before_epoch
-        average_loss = epoch_loss / no_of_batches if no_of_batches else 0.0
-
-
-        # Client ID, completed epoch, batch count and the average training loss; info passing to printer.py.
-        report_progress(
-            config,
-            "epoch_completed",
-            client_id=client.client_id,
-            epoch=epoch + 1,
-            batches=no_of_batches,
-            average_loss=average_loss,
-            client_loss=client_loss,
-        )
-
-    updated_weights = {}
-    for name, value in local_model.state_dict().items():
-        updated_weights[name] = value.detach().cpu().clone()
-
-    config.fairrfl_client_losses[client.client_id] = client_loss
-    no_of_samples = len(client.train_loader.dataset)
-
-
-    # Client ID, summed local training loss and its training sample count; info passing to printer.py.
-    report_progress(
-        config,
-        "client_completed",
-        client_id=client.client_id,
-        client_loss=client_loss,
+        client_loss=global_loss,
+        local_steps=config.fairrfl_local_steps[client.client_id],
         training_samples=no_of_samples,
     )
 
     return updated_weights, no_of_samples
+
+
+# train_fairrfl_client() passes the received global model here; this is F_i(w[k]) in Algorithm 3 of the paper.
+@torch.no_grad()
+def global_model_loss(global_model, train_loader, config):
+    model = copy.deepcopy(global_model).to(config.device)
+    model.eval()
+    loss_function = torch.nn.CrossEntropyLoss(reduction="sum")
+    total_loss = 0.0
+    total_samples = 0
+
+
+    # Keep the training shuffle and augmentation randomness identical to the other methods.
+    with fork_rng(devices=[]):
+        for images, labels in train_loader:
+            predictions = model(images.to(config.device))
+            total_loss += loss_function(predictions, labels.to(config.device)).item()
+            total_samples += labels.size(0)
+
+    if total_samples == 0 or not np.isfinite(total_loss):
+        raise ValueError("FairRFL got a non-finite global-model loss on a client's training data.")
+    return total_loss / total_samples
 
 
 # fairrfl() sends the flagged update and median statistics here for the authors' ten-step recovery search.
@@ -175,6 +120,14 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
         median_previous_loss = np.median(positive_losses) if positive_losses else 1.0
     client_vectors = []
     client_normalizers = []
+    local_update_norms = []
+
+
+    # q-FFL treats L(w - w_local) as one gradient; with several momentum SGD steps, L = (1 - momentum) / (lr * steps).
+    lipschitz = config.fairrfl_lipschitz
+    if lipschitz is None:
+        steps = [config.fairrfl_local_steps[client.client_id] for client in clients]
+        lipschitz = (1 - config.momentum) / (config.lr * np.mean(steps))
 
     for i, weights in enumerate(client_weights):
         client_id = clients[i].client_id
@@ -184,21 +137,28 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
             client_parts.append(client_parameter.numpy().reshape(-1))
 
         client_vector = np.concatenate(client_parts)
+        if not np.isfinite(client_vector).all():
+            raise ValueError(f"Non-finite FairRFL local model for client {client_id}.")
+        local_update_norms.append(float(np.linalg.norm(client_vector - global_vector)))
 
         if config.fairrfl_q != 0:
             client_loss = config.fairrfl_client_losses[client_id]
 
-            client_q = config.fairrfl_q * (previous_losses[i] / median_previous_loss)
-            estimated_gradient = (client_vector - global_vector) / config.lr
+            client_q = config.fairrfl_q
+            if config.fairrfl_dynamic_q:
+                client_q *= previous_losses[i] / median_previous_loss
+            estimated_gradient = (client_vector - global_vector) * lipschitz
             loss_weight = np.float_power(client_loss + 0.0000000001, client_q)
             weighted_update = loss_weight * estimated_gradient
             client_normalizer = (
                 client_q
                 * np.float_power(client_loss + 0.0000000001, client_q - 1)
                 * np.linalg.norm(estimated_gradient) ** 2
-                + (1 / config.lr) * loss_weight
+                + lipschitz * loss_weight
             )
             client_normalizers.append(client_normalizer)
+            if not np.isfinite(client_normalizer) or client_normalizer <= 0 or not np.isfinite(weighted_update).all():
+                raise ValueError(f"Non-finite or invalid FairRFL fairness weighting for client {client_id}; inspect losses and q.")
 
 
             # Client ID, previous/current losses, dynamic q, loss weight and normalizer; info passing to printer.py.
@@ -225,7 +185,12 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
                 offset += size
             client_vector = np.concatenate(weighted_parts)
 
+        if not np.isfinite(client_vector).all():
+            raise ValueError(f"Non-finite FairRFL weighted model (overflow) for client {client_id}.")
         client_vectors.append(client_vector)
+
+    if config.selfishness:
+        client_vectors = attack_vectors(client_vectors, global_vector, clients, config)
 
 
     # Compare update norms with the median and recover outliers using the rule from selfishness.py.
@@ -304,6 +269,13 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
         previous_losses=previous_losses,
         client_losses=config.fairrfl_previous_losses,
         normalizers=client_normalizers,
+        lipschitz=lipschitz,
+        server_update_norm=float(np.linalg.norm(new_global_vector - global_vector)),
+        median_local_update_norm=float(np.median(local_update_norms)),
+        small_server_update=(
+            config.current_round >= 2
+            and np.linalg.norm(new_global_vector - global_vector) < 0.01 * np.median(local_update_norms)
+        ),
     )
 
     return new_weights

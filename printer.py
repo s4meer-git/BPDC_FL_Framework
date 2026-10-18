@@ -15,60 +15,28 @@ run_settings = {}
 csv.field_size_limit(sys.maxsize)
 
 
-# main.py calls this to let the console user choose an existing comparison folder or create a named one.
-def choose_directory():
-    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    folders = sorted(
-        folder for folder in LOG_DIRECTORY.iterdir()
-        if folder.is_dir()
-        and not folder.name.startswith((".", "result_"))
-        and folder.name not in {"archive", "failed"}
-    )
-
-    print("\nChoose a folder for the method CSVs:")
-
-    for number, folder in enumerate(folders, start=1):
-        print(f"{number}. {folder.name}")
-
-    while True:
-        choice = input("Folder number, name or full path [comparison]: ").strip() or "comparison"
-
-        if choice.isdigit():
-            if 1 <= int(choice) <= len(folders):
-                return folders[int(choice) - 1]
-
-            print("Pick a number from the list, or type a name for a new folder.")
-            continue
-
-        folder = Path(choice).expanduser()
-
-        if not folder.is_absolute():
-            folder = LOG_DIRECTORY / folder
-
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder
-
-
-# main.py supplies the folder and config; clear only this method's CSV before writing its new run.
-def start_run(config, output_directory=None):
-    global csv_file, run_settings
-
-    if output_directory is None:
-        folder = LOG_DIRECTORY / "comparison"
-    else:
-        folder = Path(output_directory).expanduser()
-
-    folder.mkdir(parents=True, exist_ok=True)
-
-    csv_file = folder / f"{config.method.lower()}.csv"
-    csv_file.write_text("", encoding="utf-8")
-
-    run_settings = {
+# The launcher and main.py pass a config here to record experiment settings and selected selfish clients.
+def settings_from_config(config):
+    run_state = {"current_round", "fcfl_global_accuracy"}
+    settings = {
         name: value
         for name, value in vars(config).items()
-        if value is None or isinstance(value, (str, bool, int, float))
+        if (value is None or isinstance(value, (str, bool, int, float))) and name not in run_state
     }
-    run_settings["training_batch_size"] = config.get_training_batch_size()
+    settings["training_batch_size"] = config.batch_size
+    settings["selfish_client_ids"] = config.selfish_client_ids
+    settings["selfish_attack"] = "known_client_count_v1" if config.selfishness else "none"
+    return settings
+
+
+# main.py supplies the selected folder; replace this method's CSV after the launcher has checked existing settings.
+def start_run(config, output_directory=None):
+    global csv_file, run_settings
+    folder = LOG_DIRECTORY / "comparison" if output_directory is None else Path(output_directory).expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    csv_file = folder / f"{config.method.lower()}.csv"
+    csv_file.write_text("", encoding="utf-8")
+    run_settings = settings_from_config(config)
 
 
 # main.py calls this when training ends; the method CSV stays saved and only the active run's settings are cleared.
@@ -138,11 +106,11 @@ def print_progress(event, data):
         print("Clients:", settings["num_of_clients"])
         print("Rounds:", settings["rounds"])
         print("Training batch size:", settings["training_batch_size"])
+        print("Selfish clients:", settings.get("selfish_client_ids", []))
+        if settings.get("selfishness", False):
+            print("Attack strength:", settings["selfish_strength"], "starting round:", settings["selfish_start_round"])
 
-        if settings["method"].lower() == "fairmedian":
-            print("FairMedian uses one minibatch gradient per client per round.")
-        else:
-            print("Local epochs:", settings["local_epochs"])
+        print("Local epochs:", settings["local_epochs"])
 
         if settings["method"].lower() == "fedmut" and settings["dataset"].lower() == "cifar10":
             print("FedMut CIFAR-10 gradient norm limit:", settings.get("fedmut_cifar_grad_norm"))
@@ -189,14 +157,20 @@ def print_progress(event, data):
             flush=True,
         )
 
-    elif event == "gradient_started":
-        print("Collecting gradient from client", data["client_id"], flush=True)
-
     elif event == "aggregation_started":
         print("Aggregating updates from", data["client_count"], "clients", flush=True)
 
     elif event == "fairrfl_detection":
         print("FairRFL detected clients:", data["detected_clients"])
+        print("FairRFL server update norm:", round(data["server_update_norm"], 6))
+        if data.get("small_server_update", False):
+            print("FairRFL's global update is small relative to local updates; inspect this short run before extending it.")
+
+    elif event == "fcfl_aggregated":
+        print("FCFL weights:", [round(weight, 4) for weight in data["weights"]])
+
+    elif event == "selfish_round":
+        print("Clients applying the selfish attack:", data["attacked_client_ids"])
 
     elif event == "round_accuracy":
         print(
@@ -237,6 +211,11 @@ def print_progress(event, data):
         )
 
         print("Jain fairness index:", round(metrics["jain_fairness_index"], 4))
+        if "honest_clients" in metrics:
+            honest = metrics["honest_clients"]
+            print("Honest clients mean accuracy:", round(honest["mean_client_accuracy"] * 100, 2), "%")
+            print("Honest clients standard deviation:", round(honest["client_standard_deviation"] * 100, 2), "percentage points")
+            print("Honest clients worst accuracy:", round(honest["worst_client_accuracy"] * 100, 2), "%")
 
     elif event == "run_completed":
         print("CSV:", data["csv_file"])

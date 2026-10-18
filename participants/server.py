@@ -1,5 +1,6 @@
 import printer
 import torch
+from support_modules.selfishness import attack_models
 
 
 # Receives round numbers, participating clients and sample counts from run_one_round(); info passing to printer.py.
@@ -13,10 +14,8 @@ def run_one_round(global_model, clients, config, round_number):
 
     if not clients:
         raise ValueError("A communication round requires at least one client.")
-    if method not in {"fedavg", "fairrfl", "fairmedian", "fedcda", "fedmut"}:
+    if method not in {"fedavg", "fairrfl", "fedcda", "fedmut", "fcfl"}:
         raise ValueError("Unknown method name: " + config.method)
-    if method == "fairmedian" and len(clients) % 2 == 0:
-        raise ValueError("FairMedian requires an odd number of clients.")
     config.current_round = round_number
 
 
@@ -37,6 +36,10 @@ def run_one_round(global_model, clients, config, round_number):
         from methods.fedmut import prepare_fedmut_round
 
         clients = prepare_fedmut_round(clients, config, round_number)
+    elif method == "fcfl":
+        from methods.fcfl import prepare_fcfl_round
+
+        clients = prepare_fcfl_round(global_model, clients, config, round_number)
 
     all_client_weights = []
     all_client_sizes = []
@@ -55,6 +58,18 @@ def run_one_round(global_model, clients, config, round_number):
         client_ids=[client.client_id for client in clients],
         client_sizes=all_client_sizes,
     )
+
+
+
+    # Each attacker scales its update by its real share of this method's aggregate (FedCDA and FedMut average equally).
+    if config.selfishness and method != "fairrfl":
+        shares = None
+        if method == "fedavg":
+            total = sum(all_client_sizes)
+            shares = {client.client_id: size / total for client, size in zip(clients, all_client_sizes)}
+        elif method == "fcfl":
+            shares = {client.client_id: config.fcfl_weights[client.client_id] for client in clients}
+        all_client_weights = attack_models(all_client_weights, global_model, clients, config, shares)
 
     new_global_weights = config.aggregate(
         all_client_weights,
