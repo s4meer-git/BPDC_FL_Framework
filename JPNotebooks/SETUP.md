@@ -48,14 +48,26 @@ The training cell runs each selected method for each dataset. It checks all plan
 
 For comparison `experiment_2`, CIFAR-10, the baseline scenario and seed 42:
 
-- Local CSV: `Results/experiment_2_cifar10_baseline/seed_42/fedavg.csv`.
-- Colab backup: `MyDrive/FLFrameWork/Results/experiment_2_cifar10_baseline/seed_42/fedavg.csv`.
-- Final PDF, when its plotting cell is run: `final_test_accuracy_all_methods.pdf` beside those CSVs, one per seed.
-- Table II, when the summary cell is run after all seeds finish: `Results/experiment_2_cifar10_baseline/summary.csv` (mean ± sample standard deviation over seeds) and `summary_per_seed.csv`.
-- Optional single-method PDF: `final_test_accuracy_fairrfl.pdf` in the seed folder.
-- Diagnostic PDF: `temp/diagnostics/experiment_2_cifar10_baseline/seed_42/training_diagnostic.pdf` on the runtime's local disk.
+```text
+Results/
+└── experiment_2/                    COMPARISON_NAME (experiment_2_smoke for a smoke test)
+    └── cifar10/                     dataset
+        └── baseline/                baseline, or selfish when config.selfishness = True
+            ├── seed_42/
+            │   ├── fedavg.csv  fairrfl.csv  fedcda.csv  fedmut.csv  fcfl.csv
+            │   ├── final_test_accuracy_all_methods.pdf
+            │   └── final_test_accuracy_fairrfl.pdf   (optional single-method cell)
+            ├── seed_43/  seed_44/
+            ├── summary.csv            Table II: mean ± sample std over seeds
+            └── summary_per_seed.csv
+```
 
-Selfish runs use `_selfish` instead of `_baseline`. A smoke test uses `experiment_2_smoke_cifar10_selfish`. Different datasets always have separate folders. Repeating a plotting cell replaces that plot's PDF.
+- The settings cell prints every CSV path a run will write before training starts.
+- On Colab the identical tree is kept on Drive under `MyDrive/FLFrameWork/Results/`, updated after every round and when each plot or summary is saved.
+- The plot and summary cells read `<method>.csv` for the methods in `METHODS` from each seed folder and print every file they load. If the Colab disk was reset, they use the Drive copy and say so.
+- Diagnostic PDFs go to `temp/diagnostics/` with the same sub-folders, on the runtime's local disk.
+
+Repeating a plotting cell replaces that plot's PDF.
 
 On Colab, the current CSV is copied after each fully evaluated round and when training exits normally or with a Python exception. A hard runtime termination can lose work since the latest successful copy. A copied partial CSV is useful for diagnostics but is rejected by final analysis. Backup failures print the local path so you can retrieve it. Local use does not mount Drive.
 

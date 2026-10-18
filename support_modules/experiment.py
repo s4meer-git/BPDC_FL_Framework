@@ -42,7 +42,7 @@ def prepare_runs(config, datasets, methods, comparison_name, results_root, momen
                 run_config.reset_run_state()
                 run_config.selfish_client_ids = choose_selfish_clients(run_config)
                 scenario = "selfish" if run_config.selfishness else "baseline"
-                folder = Path(results_root) / f"{comparison_name}_{dataset}_{scenario}" / f"seed_{seed}"
+                folder = Path(results_root) / comparison_name / dataset / scenario / f"seed_{seed}"
                 runs.append((run_config, folder))
     return runs
 
@@ -76,11 +76,14 @@ def check_existing_results(config, folder):
             raise ValueError(f"{path}: method settings changed ({', '.join(changed)}). Choose a new comparison name.")
 
 
-# Backups mirror the comparison folder and its seed folder under the Drive results root.
+# Drive keeps the same tree as the local Results folder: comparison/dataset/scenario/seed_<n>.
+# A seed folder mirrors its last four parts; the scenario folder holding summary.csv mirrors three.
 def backup_path(folder, backup_root):
     if backup_root is None:
         return None
-    return Path(backup_root) / Path(folder).parent.name / Path(folder).name
+    folder = Path(folder)
+    depth = 4 if folder.name.startswith("seed_") else 3
+    return Path(backup_root).joinpath(*folder.parts[-depth:])
 
 
 # Training sends its current CSV here after each round; the plotting cells also use this to back up their PDFs.
@@ -200,6 +203,7 @@ def comparison_csvs(runs, backup_root=None):
             path = folder / f"{method}.csv"
             if not path.exists() and backup_root is not None:
                 path = backup_path(folder, backup_root) / path.name
+                print("Local CSV missing; using the Drive copy:", path)
             if not path.exists():
                 raise FileNotFoundError(f"No result for {method}: {path}")
             divergence = diverged_result(path)
@@ -207,4 +211,5 @@ def comparison_csvs(runs, backup_root=None):
                 print(f"{folder.parent.name}/{folder.name}: {method} diverged and is left out of this plot | {divergence}")
                 continue
             data[path.name] = pd.read_csv(path)
+            print("Loaded:", path)
         yield folder, data
