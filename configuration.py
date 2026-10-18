@@ -64,6 +64,10 @@ class configuration:
         self.fcfl_fraction = 1.0
 
 
+        # None uses up to four JPEG-loading processes for Tiny ImageNet on CUDA; MNIST and CIFAR-10 load faster without them.
+        self.loader_workers = None
+
+
         # Use CUDA when available, otherwise MPS on the Mac or CPU on machines without either GPU backend.
         self.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         self.reset_run_state()

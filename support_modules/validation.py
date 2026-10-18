@@ -27,6 +27,9 @@ def validate_config(config):
         value = getattr(config, name)
         if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
+    workers = config.loader_workers
+    if workers is not None and (type(workers) is not int or workers < 0):
+        raise ValueError("loader_workers must be None or a non-negative integer.")
     if config.test_partition not in ("matched", "dirichlet"):
         raise ValueError('test_partition must be "matched" or "dirichlet".')
     if type(config.seed) is not int or not 0 <= config.seed < 2**32:

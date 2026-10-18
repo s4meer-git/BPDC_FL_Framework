@@ -16,6 +16,8 @@ Run the setup, storage and settings cells in order. The settings cell constructs
 - `SMOKE_TEST = False`: the setup's 30 clients, 40 rounds, five local epochs, learning rate 0.01, momentum 0.5 for MNIST and 0.9 otherwise, and batch size 64.
 - `RERUN_COMPLETED = False`: skip matching completed method CSVs. Set it to `True` to replace them intentionally.
 
+Tiny ImageNet decodes a JPEG for every training image, which held the earlier T4 runs at about 4–6 hours per method regardless of GPU. On CUDA, `config.loader_workers = None` therefore decodes Tiny ImageNet with up to four background processes; results are identical to single-process loading for the same seed apart from the random flip augmentation, which stays the same for every method in a comparison. Set it to `0` to disable, or to a number to choose the process count.
+
 MNIST and CIFAR-10 download through torchvision. The runner downloads Tiny ImageNet when its training directory is absent. Data and active CSVs stay on the machine running Python to avoid reading every batch through Drive.
 
 FedCDA warms up for **10 rounds** in a full run (one in the smoke test), the same quarter of training as the authors' 50 of 200, and then searches its history. The old 50-round default never reached search in a 40-round run, so older FedCDA results describe a different setting and should not be mixed into a new comparison.

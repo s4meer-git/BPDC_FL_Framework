@@ -1,4 +1,5 @@
 from collections import Counter
+import os
 import torch
 from torch.random import fork_rng
 from torch.utils.data import DataLoader, Subset
@@ -20,6 +21,14 @@ from support_modules.selfishness import choose_selfish_clients
 # Receives settings, client partitions and accuracy results from functions in main.py; info passing to printer.py.
 def report_progress(config, event, **data):
     printer.report("main", event, config=config, **data)
+
+
+# Every DataLoader uses these options; for Tiny ImageNet, extra processes decode JPEGs while the GPU trains.
+def loader_options(config):
+    workers = config.loader_workers
+    if workers is None:
+        workers = min(4, os.cpu_count() or 1) if config.device == "cuda" and config.dataset == "tinyimagenet" else 0
+    return {"num_workers": workers, "pin_memory": config.device == "cuda"}
 
 
 # Split the datasets loaded by main.py into clients using the seed and Dirichlet settings from config.
@@ -79,12 +88,14 @@ def create_clients(train_dataset, test_dataset, config):
         train_loader = DataLoader(
             client_train_dataset,
             batch_size=config.batch_size,
-            shuffle=True
+            shuffle=True,
+            **loader_options(config)
         )
         test_loader = DataLoader(
             client_test_dataset,
             batch_size=config.batch_size,
-            shuffle=False
+            shuffle=False,
+            **loader_options(config)
         )
         client = Clients(client_id, train_loader, test_loader)
         clients.append(client)
@@ -187,7 +198,8 @@ def _run_experiment(config, round_callback=None):
     global_test_loader = DataLoader(
         test_dataset,
         batch_size=config.batch_size,
-        shuffle=False
+        shuffle=False,
+        **loader_options(config)
     )
 
 
