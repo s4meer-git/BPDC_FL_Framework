@@ -5,6 +5,7 @@ import numpy as np
 import printer
 from support_modules.batchnorm import merge_batchnorm_buffers
 from support_modules.selfishness import attack_vectors
+from support_modules.precision import autocast
 
 
 # Receives local losses, fairness weights and recovery statistics from the FairRFL functions; info passing to printer.py.
@@ -47,8 +48,9 @@ def global_model_loss(global_model, train_loader, config):
     # Keep the training shuffle and augmentation randomness identical to the other methods.
     with fork_rng(devices=[]):
         for images, labels in train_loader:
-            predictions = model(images.to(config.device))
-            total_loss += loss_function(predictions, labels.to(config.device)).item()
+            with autocast(config):
+                predictions = model(images.to(config.device))
+                total_loss += loss_function(predictions, labels.to(config.device)).item()
             total_samples += labels.size(0)
 
     if total_samples == 0 or not np.isfinite(total_loss):

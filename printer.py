@@ -5,6 +5,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from support_modules.precision import precision_enabled
+
 
 LOG_DIRECTORY = Path(__file__).resolve().parent / "Results"
 csv_file = None
@@ -24,6 +26,7 @@ def settings_from_config(config):
         if (value is None or isinstance(value, (str, bool, int, float))) and name not in run_state
     }
     settings["training_batch_size"] = config.batch_size
+    settings["mixed_precision"] = precision_enabled(config)
     settings["selfish_client_ids"] = config.selfish_client_ids
     settings["selfish_attack"] = "known_client_count_v1" if config.selfishness else "none"
     return settings

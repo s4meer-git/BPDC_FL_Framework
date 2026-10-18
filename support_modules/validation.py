@@ -27,6 +27,10 @@ def validate_config(config):
         value = getattr(config, name)
         if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
+    if config.mixed_precision not in (None, True, False):
+        raise ValueError("mixed_precision must be None, True or False.")
+    if config.mixed_precision is True and config.device == "mps":
+        raise ValueError("Mixed precision is supported here on CUDA (and CPU for checks), not MPS.")
     workers = config.loader_workers
     if workers is not None and (type(workers) is not int or workers < 0):
         raise ValueError("loader_workers must be None or a non-negative integer.")

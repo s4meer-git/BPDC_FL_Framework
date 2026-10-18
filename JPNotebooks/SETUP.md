@@ -18,6 +18,8 @@ Run the setup, storage and settings cells in order. The settings cell constructs
 
 Tiny ImageNet decodes a JPEG for every training image, which held the earlier T4 runs at about 4–6 hours per method regardless of GPU. On CUDA, `config.loader_workers = None` therefore decodes Tiny ImageNet with up to four background processes; results are identical to single-process loading for the same seed apart from the random flip augmentation, which stays the same for every method in a comparison. Set it to `0` to disable, or to a number to choose the process count.
 
+On CUDA, training and evaluation forward passes run in mixed precision (`config.mixed_precision = None`, fp16 with PyTorch's gradient scaler), about twice as fast on T4, L4 and A100 tensor cores. Aggregation, fairness weighting and recovery stay in fp32. Results are statistically equivalent but not bit-identical to fp32 (a few tenths of a percentage point in checks), every method in a run uses the same precision, and the CSV records it; the runner refuses to mix fp16 and fp32 results in one folder. Set it to `False` for full fp32. CPU and MPS runs are unchanged.
+
 MNIST and CIFAR-10 download through torchvision. The runner downloads Tiny ImageNet when its training directory is absent. Data and active CSVs stay on the machine running Python to avoid reading every batch through Drive.
 
 FedCDA warms up for **10 rounds** in a full run (one in the smoke test), the same quarter of training as the authors' 50 of 200, and then searches its history. The old 50-round default never reached search in a 40-round run, so older FedCDA results describe a different setting and should not be mixed into a new comparison.

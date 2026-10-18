@@ -2,6 +2,7 @@ import copy
 import math
 import torch
 import printer
+from support_modules.precision import autocast, grad_scaler
 
 
 # Receives client, epoch, batch and loss values from train_local() before forwarding them; info passing to printer.py.
@@ -26,6 +27,7 @@ def train_local(global_model, train_loader, config, client_id=None):
 
     loss_function = torch.nn.CrossEntropyLoss()
     clip_norm = None
+    scaler = grad_scaler(config)
 
 
     # Apply this safeguard only to FedMut on CIFAR-10; the shared SGD settings stay the same.
@@ -53,8 +55,11 @@ def train_local(global_model, train_loader, config, client_id=None):
 
             optimizer.zero_grad()
 
-            predictions = local_model(images)
-            loss = loss_function(predictions, labels)
+
+            # With mixed precision the forward pass runs in fp16; cross-entropy itself is still computed in fp32.
+            with autocast(config):
+                predictions = local_model(images)
+                loss = loss_function(predictions, labels)
             batch_loss = loss.item()
 
 
@@ -67,15 +72,19 @@ def train_local(global_model, train_loader, config, client_id=None):
                     "Check the training settings and the client's starting model."
                 )
 
-            loss.backward()
+            scaler.scale(loss).backward()
 
 
             # Bound unusually large CIFAR-10 FedMut gradients before they enter SGD's momentum buffer.
             gradient_data = {}
             if clip_norm is not None:
+                scaler.unscale_(optimizer)
+
+
+                # A scaled fp16 step can overflow on purpose while the scaler calibrates; the scaler then skips that step.
                 try:
                     grad_norm = torch.nn.utils.clip_grad_norm_(
-                        local_model.parameters(), clip_norm, error_if_nonfinite=True,
+                        local_model.parameters(), clip_norm, error_if_nonfinite=not scaler.is_enabled(),
                     ).item()
                 except RuntimeError as error:
                     raise ValueError(
@@ -88,7 +97,8 @@ def train_local(global_model, train_loader, config, client_id=None):
                     "gradient_clipped": grad_norm > clip_norm,
                 }
 
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             total_loss += batch_loss
             no_of_batches += 1

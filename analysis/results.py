@@ -66,6 +66,7 @@ def comparison_settings(settings):
     names = ("dataset", "model", "num_of_clients", "rounds", "local_epochs", "batch_size", "lr", "momentum", "seed", "dirichlet_alpha")
     result = {name: settings.get(name) for name in names}
     result["test_partition"] = settings.get("test_partition", "dirichlet")
+    result["mixed_precision"] = settings.get("mixed_precision", False)
     result["selfishness"] = settings.get("selfishness", False)
     if result["selfishness"]:
         for name in ("selfish_fraction", "selfish_strength", "selfish_start_round", "selfish_attack"):

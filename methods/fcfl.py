@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.random import fork_rng
 import printer
+from support_modules.precision import autocast
 
 
 # Receives queue values, unfairness gaps, selected clients and weights from FCFL functions; info passing to printer.py.
@@ -23,7 +24,8 @@ def loader_accuracy(model, data_loader, config):
     # Keep the training shuffle and augmentation randomness identical to the other methods.
     with fork_rng(devices=[]):
         for images, labels in data_loader:
-            outputs = model(images.to(config.device))
+            with autocast(config):
+                outputs = model(images.to(config.device))
             correct += (outputs.argmax(dim=1) == labels.to(config.device)).sum().item()
             total += labels.size(0)
 

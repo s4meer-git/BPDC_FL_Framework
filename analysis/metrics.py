@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import printer
+from support_modules.precision import autocast
 
 
 # Receives batch counts, correct predictions and accuracy from accuracy() before forwarding them; info passing to printer.py.
@@ -20,7 +21,11 @@ def accuracy(model, data_loader, device, config=None, client_id=None):
         images = images.to(device)
         labels = labels.to(device)
 
-        outputs = model(images)
+        if config is not None:
+            with autocast(config):
+                outputs = model(images)
+        else:
+            outputs = model(images)
         if not torch.isfinite(outputs).all().item():
             scope = "global test set" if client_id is None else f"client {client_id}"
             raise ValueError(f"Non-finite model predictions on {scope}, batch {batch}.")

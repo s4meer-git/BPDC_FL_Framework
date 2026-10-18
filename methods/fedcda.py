@@ -6,6 +6,7 @@ import math
 import torch
 from torch.random import fork_rng
 import printer
+from support_modules.precision import autocast
 
 
 # Receives selected clients, history choices and search scores from FedCDA functions; info passing to printer.py.
@@ -75,8 +76,9 @@ def train_fedcda_client(global_model, client, config):
     # Keep the training shuffle and augmentation randomness identical to the other methods.
     with torch.no_grad(), fork_rng(devices=[]):
         for images, labels in client.train_loader:
-            predictions = local_model(images.to(config.device))
-            loss = loss_function(predictions, labels.to(config.device))
+            with autocast(config):
+                predictions = local_model(images.to(config.device))
+                loss = loss_function(predictions, labels.to(config.device))
             if not torch.isfinite(loss).item():
                 raise ValueError(f"FedCDA client {client.client_id}: non-finite final local loss.")
             total_loss += loss.item()

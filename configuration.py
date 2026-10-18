@@ -64,6 +64,10 @@ class configuration:
         self.fcfl_fraction = 1.0
 
 
+        # None trains in mixed precision (fp16 forward passes) on CUDA only; False keeps full fp32 everywhere.
+        self.mixed_precision = None
+
+
         # None uses up to four JPEG-loading processes for Tiny ImageNet on CUDA; MNIST and CIFAR-10 load faster without them.
         self.loader_workers = None
 
@@ -88,6 +92,7 @@ class configuration:
         self.fedmut_population = []
         self.fedmut_client_slots = {}
         self.fcfl_queue = {}
+        self.grad_scaler = None
         self.fcfl_weights = {}
         self.fcfl_global_accuracy = None
         self.fcfl_train_accuracies = {}
