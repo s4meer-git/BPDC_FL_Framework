@@ -112,7 +112,7 @@ Source: [HMHelloWorld/FedMut](https://github.com/HMHelloWorld/FedMut), commit
 `7716db06d2d72e56ab678818f9df13ae8949ae6f`.
 Unmodified `Algorithm/Training_FedMut.py`, `models/Fed.py`, `utils/options.py`, and
 the MIT license are saved locally in `.reference/fedmut`.
-The published project also retains the license in `LICENSE.FedMut`.
+The published project also retains the license in `docs/LICENSE.FedMut`.
 
 The adapter follows the SGD branch, equal-weight `Aggregation(w_locals, None)`,
 global-model differences, and `mutation_spread`. Each state entry receives its

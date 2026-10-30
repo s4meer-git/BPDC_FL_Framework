@@ -13,4 +13,7 @@ notes.txt
 
 # Local checks and diagnostic outputs stay outside version control.
 /temp/
+/docs/*
+!/docs/LICENSE
+!/docs/LICENSE.FedMut
 /Results_GColab/

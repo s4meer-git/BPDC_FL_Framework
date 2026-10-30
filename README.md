@@ -16,4 +16,4 @@ See [the setup guide](JPNotebooks/SETUP.md) for settings, folders and synchroniz
 
 See [method references](methods/REFERENCES.md) for the authors, equations and adaptations. Introducing selfish clients does not guarantee a particular ranking. Compare mean accuracy, worst-client accuracy and client standard deviation together, including the honest-client group.
 
-Datasets, virtual environments and saved experiments are not part of the source distribution. The project license is [MIT](LICENSE); the adapted FedMut code retains its original [MIT notice](LICENSE.FedMut).
+Datasets, virtual environments and saved experiments are not part of the source distribution. The project license is [MIT](docs/LICENSE); the adapted FedMut code retains its original [MIT notice](docs/LICENSE.FedMut).
