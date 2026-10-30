@@ -17,7 +17,7 @@ METHODS = ("fedavg", "fairrfl", "fedcda", "fedmut", "fcfl")
 
 
 # The notebook passes its settings and selections here; validate every planned run before spending training time.
-# Results go to Results/<dataset>/RUN1, RUN2, ... (one RUN per seed, in SEEDS order), with one CSV per method.
+# Results go to Results/<dataset>/RUN<n>/<selfish|non_selfish>/<method>.csv; RUN<n> is the n-th seed in SEEDS.
 def prepare_runs(config, datasets, methods, results_root, momentum_by_dataset, seeds, smoke_test=False):
     if not datasets or not methods or len(set(datasets)) != len(datasets) or len(set(methods)) != len(methods):
         raise ValueError("Choose at least one dataset and method, without duplicates.")
@@ -42,11 +42,10 @@ def prepare_runs(config, datasets, methods, results_root, momentum_by_dataset, s
                 run_config.selfish_client_ids = choose_selfish_clients(run_config)
 
 
-                # Selfish runs and smoke tests get their own dataset folder so they never mix with the full baseline.
-                dataset_folder = dataset + ("_selfish" if run_config.selfishness else "")
-                if smoke_test:
-                    dataset_folder = "smoke_" + dataset_folder
-                folder = Path(results_root) / dataset_folder / f"RUN{run_number}"
+                # Smoke tests get their own dataset folder so they never mix with the full runs.
+                dataset_folder = ("smoke_" if smoke_test else "") + dataset
+                scenario = "selfish" if run_config.selfishness else "non_selfish"
+                folder = Path(results_root) / dataset_folder / f"RUN{run_number}" / scenario
                 runs.append((run_config, folder))
     return runs
 
@@ -80,12 +79,12 @@ def check_existing_results(config, folder):
             raise ValueError(f"{path}: method settings changed ({', '.join(changed)}). Move or rename that folder to keep it, then run again.")
 
 
-# Drive keeps the same tree as the local Results folder: <dataset>/RUN<n>, with summary.csv in <dataset>.
+# Drive keeps the same tree as the local Results folder: <dataset>/RUN<n>/<scenario>, with summaries in <dataset>.
 def backup_path(folder, backup_root):
     if backup_root is None:
         return None
     folder = Path(folder)
-    depth = 2 if folder.name.startswith("RUN") else 1
+    depth = 3 if folder.name in ("selfish", "non_selfish") else 1
     return Path(backup_root).joinpath(*folder.parts[-depth:])
 
 

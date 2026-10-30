@@ -48,21 +48,22 @@ An attack does not guarantee FairRFL will be best or that any method will remain
 
 The training cell runs each selected method for each dataset. It checks all planned configurations and existing folders before training. Matching completed results are reused; incomplete runs restart at round 1. There is no model/optimizer checkpoint resume.
 
-Results are saved by dataset, with one RUN folder per seed (RUN1 is the first seed in `SEEDS`):
+Results are saved by dataset, then one RUN folder per seed (RUN1 is the first seed in `SEEDS`), then the scenario:
 
 ```text
 Results/
-├── tinyimagenet/                 full baseline run
-│   ├── RUN1/                     seed 42
-│   │   ├── fedavg.csv  fairrfl.csv  fedcda.csv  fedmut.csv  fcfl.csv
-│   │   ├── final_test_accuracy_all_methods.pdf
-│   │   └── final_test_accuracy_fairrfl.pdf   (optional single-method cell)
-│   ├── RUN2/                     seed 43
-│   ├── RUN3/                     seed 44
-│   ├── summary.csv               Table II: mean ± sample std over the RUNs
-│   └── summary_per_seed.csv
-├── tinyimagenet_selfish/         same layout, config.selfishness = True
-└── smoke_tinyimagenet/           same layout, SMOKE_TEST = True
+├── mnist/
+│   ├── RUN1/                         seed 42
+│   │   ├── non_selfish/              config.selfishness = False
+│   │   │   ├── fedavg.csv  fairrfl.csv  fcfl.csv  fedcda.csv  fedmut.csv
+│   │   │   └── final_test_accuracy_all_methods.pdf
+│   │   └── selfish/                  config.selfishness = True
+│   │       └── (same files)
+│   ├── RUN2/                         seed 43
+│   ├── RUN3/                         seed 44
+│   ├── summary_non_selfish.csv       Table II: mean ± sample std over the RUNs
+│   └── summary_selfish.csv
+└── smoke_mnist/                      same layout, SMOKE_TEST = True
 ```
 
 - The settings cell prints every CSV path a run will write before training starts.
