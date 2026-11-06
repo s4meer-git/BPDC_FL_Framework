@@ -92,6 +92,44 @@ def recover_update(client_update, median_update, median_norm, config=None, clien
     return recovered_update
 
 
+# fairrfl() passes the outgoing client vectors here; flag norms far above the median and recover them toward the median update.
+def screen_updates(client_vectors, global_vector, clients, config):
+    updates = []
+    norm_values = []
+    for client_vector in client_vectors:
+        client_update = client_vector - global_vector
+        updates.append(client_update)
+        norm_values.append(np.linalg.norm(client_update))
+
+    median_norm = np.percentile(norm_values, 50)
+    median_update = np.median(updates, axis=0)
+    median_deviation = np.median(np.abs(norm_values - median_norm), axis=0)
+    scaled_deviation = 1.4826 * median_deviation
+    detected_clients = []
+
+    for i in range(len(client_vectors)):
+        if scaled_deviation == 0:
+
+
+            # With zero deviation, only norms above the median are outliers; this avoids dividing by zero.
+            is_outlier = norm_values[i] > median_norm
+        else:
+            normalized_deviation = (norm_values[i] - median_norm) / scaled_deviation
+            is_outlier = normalized_deviation > config.fairrfl_tau
+        if is_outlier:
+            detected_clients.append(clients[i].client_id)
+            recovered_update = recover_update(
+                updates[i],
+                median_update,
+                median_norm,
+                config=config,
+                client_id=clients[i].client_id,
+            )
+            client_vectors[i] = global_vector + recovered_update
+
+    return client_vectors, detected_clients, norm_values, median_norm, scaled_deviation
+
+
 # Receives local weights, client IDs and stored losses through config.aggregate() to weight, detect and recover updates.
 def fairrfl(client_weights, client_sizes, global_model, clients, config):
     no_of_clients = len(client_weights)
@@ -131,6 +169,7 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
         steps = [config.fairrfl_local_steps[client.client_id] for client in clients]
         lipschitz = (1 - config.momentum) / (config.lr * np.mean(steps))
 
+    raw_vectors = []
     for i, weights in enumerate(client_weights):
         client_id = clients[i].client_id
         client_parts = []
@@ -142,6 +181,28 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
         if not np.isfinite(client_vector).all():
             raise ValueError(f"Non-finite FairRFL local model for client {client_id}.")
         local_update_norms.append(float(np.linalg.norm(client_vector - global_vector)))
+        raw_vectors.append(client_vector)
+
+
+    # The authors screen the loss-weighted updates; this option screens the updates as sent, before the fairness weighting.
+    screen_before_weighting = getattr(config, "fairrfl_screen_before_weighting", False)
+    if screen_before_weighting:
+        if config.selfishness:
+            raw_vectors = attack_vectors(raw_vectors, global_vector, clients, config)
+
+
+        # Off by default; True screens each update divided by the square root of its local steps, then scales it back.
+        step_scales = np.ones(len(raw_vectors))
+        if getattr(config, "fairrfl_screen_sqrt_steps", False):
+            step_scales = np.sqrt([config.fairrfl_local_steps[client.client_id] for client in clients])
+            raw_vectors = [global_vector + (vector - global_vector) / scale for vector, scale in zip(raw_vectors, step_scales)]
+        raw_vectors, detected_clients, norm_values, median_norm, scaled_deviation = screen_updates(
+            raw_vectors, global_vector, clients, config
+        )
+        raw_vectors = [global_vector + (vector - global_vector) * scale for vector, scale in zip(raw_vectors, step_scales)]
+
+    for i, client_vector in enumerate(raw_vectors):
+        client_id = clients[i].client_id
 
         if config.fairrfl_q != 0:
             client_loss = config.fairrfl_client_losses[client_id]
@@ -191,43 +252,12 @@ def fairrfl(client_weights, client_sizes, global_model, clients, config):
             raise ValueError(f"Non-finite FairRFL weighted model (overflow) for client {client_id}.")
         client_vectors.append(client_vector)
 
-    if config.selfishness:
-        client_vectors = attack_vectors(client_vectors, global_vector, clients, config)
-
-
-    # Compare update norms with the median and recover outliers using the rule from selfishness.py.
-    updates = []
-    norm_values = []
-    for client_vector in client_vectors:
-        client_update = client_vector - global_vector
-        updates.append(client_update)
-        norm_values.append(np.linalg.norm(client_update))
-
-    median_norm = np.percentile(norm_values, 50)
-    median_update = np.median(updates, axis=0)
-    median_deviation = np.median(np.abs(norm_values - median_norm), axis=0)
-    scaled_deviation = 1.4826 * median_deviation
-    detected_clients = []
-
-    for i in range(no_of_clients):
-        if scaled_deviation == 0:
-
-
-            # With zero deviation, only norms above the median are outliers; this avoids dividing by zero.
-            is_outlier = norm_values[i] > median_norm
-        else:
-            normalized_deviation = (norm_values[i] - median_norm) / scaled_deviation
-            is_outlier = normalized_deviation > config.fairrfl_tau
-        if is_outlier:
-            detected_clients.append(clients[i].client_id)
-            recovered_update = recover_update(
-                updates[i],
-                median_update,
-                median_norm,
-                config=config,
-                client_id=clients[i].client_id,
-            )
-            client_vectors[i] = global_vector + recovered_update
+    if not screen_before_weighting:
+        if config.selfishness:
+            client_vectors = attack_vectors(client_vectors, global_vector, clients, config)
+        client_vectors, detected_clients, norm_values, median_norm, scaled_deviation = screen_updates(
+            client_vectors, global_vector, clients, config
+        )
 
     new_global_vector = np.mean(client_vectors, axis=0)
 

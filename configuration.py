@@ -29,6 +29,7 @@ class configuration:
         self.test_partition = "matched"
 
 
+
         # Turn this on to simulate selfish clients; 0.05 gives one selfish client among 30, the paper's main scenario.
         self.selfishness = False
         self.selfish_fraction = 0.05
@@ -41,6 +42,18 @@ class configuration:
         self.fairrfl_tau = 2.5
         self.fairrfl_dynamic_q = True
         self.fairrfl_lipschitz = None
+
+
+        # Off by default, as in the authors' method; True screens the updates before the fairness weighting (stress test only).
+        self.fairrfl_screen_before_weighting = False
+
+
+        # Off by default; True also divides each update by the square root of its local steps for that screen (stress test only).
+        self.fairrfl_screen_sqrt_steps = False
+
+
+        # Off by default; True clips each FedAvg update to the round's median update norm, a simple robust baseline.
+        self.fedavg_norm_clip = False
 
 
         # The authors warm up for 50 of 200 rounds; 10 keeps that quarter of a 40-round run before history search.
@@ -136,7 +149,7 @@ class configuration:
         if method_name == "fedavg":
             from methods.fedavg import fedavg
 
-            return fedavg(client_weights, client_sizes, config=self)
+            return fedavg(client_weights, client_sizes, config=self, global_model=global_model)
 
         elif method_name == "fairrfl":
             from methods.fairrfl import fairrfl

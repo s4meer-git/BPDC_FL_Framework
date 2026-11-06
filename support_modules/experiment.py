@@ -72,7 +72,7 @@ def check_existing_results(config, folder):
             raise ValueError(f"{path}: shared settings differ from this run. Move or rename that folder to keep it, then run again.")
         if previous["method"] != config.method:
             continue
-        defaults = {"fairrfl_dynamic_q": True}
+        defaults = {"fairrfl_dynamic_q": True, "fairrfl_screen_before_weighting": False, "fairrfl_screen_sqrt_steps": False, "fedavg_norm_clip": False}
         keys = [key for key in expected if key.startswith(config.method + "_")]
         changed = [key for key in keys if previous.get(key, defaults.get(key)) != expected[key]]
         if changed:

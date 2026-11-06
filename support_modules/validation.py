@@ -44,7 +44,7 @@ def validate_config(config):
             raise ValueError(f"{name} must be positive and finite.")
     if not math.isfinite(config.momentum) or not 0 <= config.momentum < 1:
         raise ValueError("momentum must be between 0 and 1, excluding 1.")
-    for name in ("selfishness", "fairrfl_dynamic_q"):
+    for name in ("selfishness", "fairrfl_dynamic_q", "fairrfl_screen_before_weighting", "fairrfl_screen_sqrt_steps", "fedavg_norm_clip"):
         if type(getattr(config, name)) is not bool:
             raise ValueError(f"{name} must be True or False.")
 
@@ -56,6 +56,8 @@ def validate_config(config):
         limit = config.fairrfl_lipschitz
         if limit is not None and (type(limit) not in (int, float) or not math.isfinite(limit) or limit <= 0):
             raise ValueError("fairrfl_lipschitz must be positive or None.")
+        if config.fairrfl_screen_sqrt_steps and not config.fairrfl_screen_before_weighting:
+            raise ValueError("fairrfl_screen_sqrt_steps needs fairrfl_screen_before_weighting=True.")
     if config.method == "fcfl":
         for name in ("fcfl_alpha", "fcfl_fraction"):
             if type(getattr(config, name)) not in (int, float) or not math.isfinite(getattr(config, name)):
